@@ -1,0 +1,384 @@
+{
+  "box_count": 14,
+  "product_box_count": 13,
+  "boxes": [
+    {
+      "art_no": "LH78220",
+      "colour": "SILVER",
+      "sizes": {},
+      "available_sizes": [],
+      "raw_text": "EHL\nART\nNQA:\nLH78220\nSILVER\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n12 2 ,\nQTY:\n6\nPRS\nN,W:\nKGS\nG.W:\nKGS\nMEAS: 6 4 XA 7 X 31 CM",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3459,
+        "box": [
+          10679,
+          381,
+          12811,
+          4247
+        ]
+      }
+    },
+    {
+      "art_no": "LH78220",
+      "colour": "SILVER",
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "available_sizes": [
+        "37",
+        "38",
+        "39",
+        "40"
+      ],
+      "raw_text": "EHL\nLH78220\nART\nSILVER\nNO::\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n^\n1 2 2 1\nPRS\n6\nQTY:\nKGS\nN,W:\nKCS\nG.W:\nMEAS: 6 4 XF 7 X31 CM",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3753,
+        "box": [
+          9036,
+          528,
+          11332,
+          4508
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "available_sizes": [
+        "37",
+        "38",
+        "39",
+        "40"
+      ],
+      "raw_text": "EAL\nART\nNO:\n470226\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n1 2 2 1\nPRS\nQTY;\n6\nN.W:\nKGS\nG.W:\nKGS\nMEAS: 64X ('\nCM",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.4019,
+        "box": [
+          7023,
+          549,
+          9498,
+          4764
+        ]
+      }
+    },
+    {
+      "art_no": "LH78220",
+      "colour": "GREY",
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1
+      },
+      "available_sizes": [
+        "37",
+        "38",
+        "39",
+        "40"
+      ],
+      "raw_text": "EF\nART NO:\nLH78220\nGREY\nCOLOUR:\nSIZE: 36 37 38 39 40 AJ\n1 2 2 1\n1\nPRS\nQTY:\n6\nN,W:\nKGS\nG.W:\nKGS\nMEAS: 6 4 3 ( 7 % 31 CM",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.363,
+        "box": [
+          12441,
+          555,
+          14634,
+          4280
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": "GREY",
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "available_sizes": [
+        "37",
+        "38",
+        "39",
+        "40"
+      ],
+      "raw_text": "EHL\nART NO:\nGREY\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n1 2 2 1\nQTY;\n6\nPRS\nKGS\nG.W:\nKGS",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box carton box",
+        "score": 0.3437,
+        "box": [
+          14269,
+          642,
+          16206,
+          4345
+        ]
+      }
+    },
+    {
+      "art_no": "LH78220",
+      "colour": "D.BEIGE",
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "available_sizes": [
+        "37",
+        "38",
+        "39",
+        "40"
+      ],
+      "raw_text": "EFL\nART\nNO::\nD.BEIGE\nLH78220\nCOLOUR:\nSIZE: 36 37 38 39.40 41\n1 2 2 1\nPRS\n6\nQTY:\nKCS\nKGS\nG.W:\nNEAS: 6 4 X( 7 X31 CM",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3442,
+        "box": [
+          10875,
+          3943,
+          13018,
+          7652
+        ]
+      }
+    },
+    {
+      "art_no": "L478220",
+      "colour": null,
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "41": 0
+      },
+      "available_sizes": [
+        "37",
+        "38",
+        "39"
+      ],
+      "raw_text": "EFL\nL478220 DBELGE\nNO.:\nART\nCOLOUR:\nSIZE: 36 37 38 39 4 41\n1 2 2\nRRS\n6\nQTY:\nN,W:\nIGS\nG.W;\nMEAS: 6 4 X( 7 X31 C",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3558,
+        "box": [
+          12577,
+          3959,
+          14819,
+          7929
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": "WHITE",
+      "sizes": {
+        "36": 36,
+        "37": 37,
+        "38": 38
+      },
+      "available_sizes": [
+        "36",
+        "37",
+        "38"
+      ],
+      "raw_text": "EHL\nEFC\nWHITE\nNO::\nART\n476220\nCOLOUR:\nNO::\nART\n40 41\n39\nSIZE: 36 37 38\nCOLOUR:\n1 2 2 1\nSIZE: 36 37 38\nPRS\n1 2\nOTY\nKGS\n6\nQTY:\nN:L\nKGS\nN.W:\nG.W\nCM\n33\n6.W:\n64\nMEAS:\nMEAS: 6 4 XF",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box shoe box carton box",
+        "score": 0.3823,
+        "box": [
+          457,
+          4041,
+          4564,
+          8892
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "available_sizes": [
+        "37",
+        "38",
+        "39",
+        "40"
+      ],
+      "raw_text": "ERL\nDZEIGE\nART\nNO:\n122\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n1 2 2 1\nPRS\nQTY:\nKGS\nN.W:\nKES\nMEAS: 64 X ('7 X3 ( CM",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3382,
+        "box": [
+          14438,
+          4095,
+          16320,
+          7864
+        ]
+      }
+    },
+    {
+      "art_no": "LH78220",
+      "colour": "SILVER",
+      "sizes": {},
+      "available_sizes": [],
+      "raw_text": "EFL\nNO:\nART\nSILVER\nLH78220\nCOLOUR:\nSIZE: 36 37 88 39 40 41\n1 :2 2 |\nPRS\n8\n6\nQTY:\n9\nKGS\nN.W:\n1\nKGS\nG.W:\nMEAS: 64 X ( 7 X3 ( CH",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.354,
+        "box": [
+          9128,
+          4182,
+          11408,
+          8163
+        ]
+      }
+    },
+    {
+      "art_no": "LH78220",
+      "colour": "SILVER",
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 0,
+        "40": 2,
+        "41": 0
+      },
+      "available_sizes": [
+        "37",
+        "38",
+        "40"
+      ],
+      "raw_text": "EFL\nNO::\nART\nSILVER\nLH78220\nCOLOUR:\n36 37 38 39 40. 41\nSIZE:\n1 2 2\nPRS\nQTY:\nKGS\nN.W:\nKGS\nG,W:\nCM\nMEAS; 64X (7 X3(",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box shoe box carton box",
+        "score": 0.3712,
+        "box": [
+          5076,
+          4498,
+          7660,
+          9001
+        ]
+      }
+    },
+    {
+      "art_no": "LH78220",
+      "colour": "SILVER",
+      "sizes": {},
+      "available_sizes": [],
+      "raw_text": "EFL\nNO;;\nART\nSILVER\nCOLOUR:\nLH78220\nSIZE: 36 87 38.39.40.41\n1 2 2 1\nPRS\n6\nQTY:\nKGS\nN.W:\nKGS\nG,W:\nMEAS: 64 X (7 X3 ( CM",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3682,
+        "box": [
+          7154,
+          4525,
+          9602,
+          8647
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "available_sizes": [
+        "37",
+        "38",
+        "39",
+        "40"
+      ],
+      "raw_text": "EAC\nWNHITE\n476220\nNO::\nART\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n1 2 2 1\nPRS\n6\nQTY:\nKGS\nN.W:\nKGS\nG.W:\n6 4 X{7 *31 CI\nMEAS:",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box shoe box carton box",
+        "score": 0.3517,
+        "box": [
+          3036,
+          4601,
+          5609,
+          9088
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {},
+      "available_sizes": [],
+      "raw_text": "1\n4LO)",
+      "rotation": 0,
+      "has_product_data": false,
+      "detection": {
+        "label": "cardboard box carton box",
+        "score": 0.2066,
+        "box": [
+          11326,
+          7233,
+          13926,
+          9180
+        ]
+      }
+    }
+  ]
+}
