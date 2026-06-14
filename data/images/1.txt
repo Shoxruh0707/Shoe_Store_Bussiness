@@ -1,0 +1,59 @@
+boxes_detected: 6
+boxes_with_product_data: 4
+
+[box 1]
+raw_text:
+NO_PRODUCT_DATA
+has_product_data: false
+
+[box 2]
+raw_text:
+ART NO: CF005
+COLOUR: LBEIGE
+
+SIZE: 37 38 39 40
+QTY: 1 2 2 1
+
+PRS: 6
+
+MEAS: 65 X 17 X 30 CM
+has_product_data: true
+
+[box 3]
+raw_text:
+ART NO: CF005
+COLOUR: LBEIGE
+
+PRS: 6
+
+MEAS: 65 X 17 X 30 CM
+has_product_data: true
+
+[box 4]
+raw_text:
+NO_PRODUCT_DATA
+has_product_data: false
+
+[box 5]
+raw_text:
+ART NO: CF005
+COLOUR: L_BEIGE
+
+SIZE: 37 38 39 40
+QTY: 1 2 2 1
+
+PRS: 6
+has_product_data: true
+
+[box 6]
+raw_text:
+ART NO: CF005
+COLOUR: LBEIGE
+
+SIZE: 37 38 39 40
+QTY: 1 2 2 1
+
+PRS: 6
+
+MEAS: 65 X 17 X 30 CM
+has_product_data: true

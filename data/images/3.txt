@@ -1,0 +1,44 @@
+{
+  "box_count": 2,
+  "product_box_count": 2,
+  "boxes": [
+    {
+      "art_no": "ZL-6419-11",
+      "colour": "BLACK",
+      "sizes": {},
+      "available_sizes": [],
+      "raw_text": "EAC\nART\nNO\nCOLOUR\nZL-6419-11\nBLACK\nSIZE: 36 37 38 39 40 41\n0 {WL1\nPRS\n6\nN.W:\nKGS\nG.W:\nKGS\nMEAS: 64X15X30.5CM",
+      "rotation": 270,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3661,
+        "box": [
+          98,
+          24,
+          2216,
+          1069
+        ]
+      }
+    },
+    {
+      "art_no": "ZL-64",
+      "colour": null,
+      "sizes": {},
+      "available_sizes": [],
+      "raw_text": "AC\nRT\nNO\nOLOUR\nZL-64\nIZE: 36 37\n0P\nHTY:\n.W:\nW:\n64X\nEAS",
+      "rotation": 90,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box shoe box carton box",
+        "score": 0.3872,
+        "box": [
+          170,
+          998,
+          2144,
+          1441
+        ]
+      }
+    }
+  ]
+}

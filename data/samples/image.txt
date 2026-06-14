@@ -1,0 +1,136 @@
+boxes_detected: 14
+boxes_with_product_data: 12
+
+[box 1]
+raw_text:
+NO_PRODUCT_DATA
+has_product_data: false
+
+[box 2]
+raw_text:
+ART NO: K3322
+COLOUR: LGRAY
+
+PRS: 6
+
+MEAS: 62.5 X 17 X 30.5 CM
+has_product_data: true
+
+[box 3]
+raw_text:
+ART NO: K3322
+COLOUR: LGRAY
+
+PRS: 6
+
+MEAS: 62.5 X 17 X 30.5 CM
+has_product_data: true
+
+[box 4]
+raw_text:
+ART NO: K3322
+COLOUR: LGRAY
+
+SIZE: 37 38 39 40
+QTY: 1 2 2 1
+
+PRS: 6
+
+MEAS: 62.5 X 17 X 30.5 CM
+has_product_data: true
+
+[box 5]
+raw_text:
+ART NO: K3322
+COLOUR: LGRAY
+
+SIZE: 37 38 39 40
+QTY: 1 2 2 1
+
+PRS: 6
+
+MEAS: 6 X 17 X 30.5 CM
+has_product_data: true
+
+[box 6]
+raw_text:
+ART NO: K3322
+COLOUR: LGRAY
+
+SIZE: 37 38 39 40
+QTY: 1 2 2 1
+
+MEAS: 62.5 X 17 X 30.5 CM
+has_product_data: true
+
+[box 7]
+raw_text:
+ART NO: K3322
+
+MEAS: 62.5 X 17 X 30.5 CM
+has_product_data: true
+
+[box 8]
+raw_text:
+ART NO: K3322
+COLOUR: WHITE
+
+PRS: 8
+
+MEAS: 62.5 X 17 X 30.5 CM
+has_product_data: true
+
+[box 9]
+raw_text:
+ART NO: K3322
+COLOUR: WHITE
+
+PRS: 6
+
+MEAS: 62.5 X 17 X 80.5 CM
+has_product_data: true
+
+[box 10]
+raw_text:
+ART NO: K3322
+COLOUR: WHITE
+
+SIZE: 37 38 39 40
+QTY: 1 2 2 1
+has_product_data: true
+
+[box 11]
+raw_text:
+ART NO: K3322
+COLOUR: WHITE
+
+SIZE: 37 38 39 40
+QTY: 1 2 2 1
+
+PRS: 6
+
+MEAS: 62.5 X 17 X 30.5 CM
+has_product_data: true
+
+[box 12]
+raw_text:
+ART NO: K3322
+COLOUR: WHITE
+
+PRS: 6
+has_product_data: true
+
+[box 13]
+raw_text:
+ART NO: K3322
+COLOUR: WHITE
+
+PRS: 6
+
+MEAS: 62.5 X 17 X 30.5 CM
+has_product_data: true
+
+[box 14]
+raw_text:
+NO_PRODUCT_DATA
+has_product_data: false

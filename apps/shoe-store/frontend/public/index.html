@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shoe Product Entry</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="toolbar">
+        <div>
+          <p class="eyebrow">Shoe Store</p>
+          <h1>Add Product</h1>
+        </div>
+        <div class="status" id="dbStatus">Checking database...</div>
+      </section>
+
+      <section class="workspace">
+        <form class="product-form" id="productForm">
+          <div class="form-header">
+            <div>
+              <h2>Product Details</h2>
+              <p>Initial product variant, inventory, and images</p>
+            </div>
+            <button type="submit" id="submitButton">Save</button>
+          </div>
+
+          <div class="fields">
+            <div class="field">
+              <label for="artNo">Art No *</label>
+              <input id="artNo" name="art_no" autocomplete="off" required />
+            </div>
+
+            <div class="field">
+              <label for="price">Initial Price *</label>
+              <input id="price" name="price" type="number" min="0" step="0.01" inputmode="decimal" required />
+            </div>
+
+            <div class="field">
+              <label for="originalPrice">Original Price *</label>
+              <input id="originalPrice" name="original_price" type="number" min="0" step="0.01" inputmode="decimal" required />
+            </div>
+
+            <div class="field">
+              <label for="season">Season *</label>
+              <select id="season" name="season" required>
+                <option value="All Season">All Season</option>
+                <option value="Spring">Spring</option>
+                <option value="Summer">Summer</option>
+                <option value="Autumn">Autumn</option>
+                <option value="Winter">Winter</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="brandName">Brand Name *</label>
+              <input id="brandName" name="brand_name" list="brandOptions" autocomplete="off" required />
+              <datalist id="brandOptions"></datalist>
+              <div class="hint">Choose existing or type a new brand.</div>
+            </div>
+
+            <div class="field">
+              <label for="typeName">Type *</label>
+              <input id="typeName" name="type_name" list="typeOptions" autocomplete="off" required />
+              <datalist id="typeOptions"></datalist>
+            </div>
+
+            <div class="field">
+              <label for="colourName">Colour</label>
+              <input id="colourName" name="colour_name" list="colourOptions" autocomplete="off" />
+              <datalist id="colourOptions"></datalist>
+              <div class="hint">Optional. Blank becomes Unknown.</div>
+            </div>
+
+            <div class="field">
+              <label for="materialType">Material</label>
+              <input id="materialType" name="material_type" list="materialOptions" autocomplete="off" />
+              <datalist id="materialOptions"></datalist>
+              <div class="hint">Choose existing or type a new material.</div>
+            </div>
+
+            <div class="field full">
+              <label>Sizes</label>
+              <div class="size-grid" id="sizeButtons"></div>
+              <div class="hint">Tap sizes to add one pair each.</div>
+            </div>
+
+            <div class="field full">
+              <label for="sizeExpression">Manual Size Rule</label>
+              <input id="sizeExpression" name="size_expression" placeholder="36-40, 38x2" autocomplete="off" />
+              <div class="hint">Examples: 36-40, 38x2, 35-39 37x2.</div>
+            </div>
+
+            <div class="field full">
+              <label for="images">Product Images</label>
+              <input id="images" name="images" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+            </div>
+          </div>
+
+          <p class="message" id="message"></p>
+        </form>
+
+        <aside class="recent-panel">
+          <div class="panel-header">
+            <h2>Recent Products</h2>
+            <button type="button" id="refreshButton">Refresh</button>
+          </div>
+          <div class="recent-list" id="recentList"></div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shoe-box-ocr"
+version = "0.1.0"
+description = "Detect and OCR shoe carton labels from images."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "Pillow>=10,<13",
+  "easyocr>=1.7,<2",
+  "transformers>=4.46,<6",
+  "torch==2.10.0+cu130",
+  "torchvision==0.25.0+cu130",
+]
+
+[project.scripts]
+shoe-box-ocr = "shoe_ocr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

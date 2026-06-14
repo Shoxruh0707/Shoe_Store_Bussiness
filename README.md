@@ -11,27 +11,48 @@ plain text, not JSON.
 ## Project Structure
 
 ```text
-shoe_box_ocr.py        Compatibility CLI wrapper
-shoe_ocr/
-  __main__.py          Enables `python -m shoe_ocr`
-  cli.py               Argument parsing and command-line flow
-  config.py            Model names, limits, and regex constants
-  reporting.py         Plain-text report formatting
-  text.py              OCR cleanup and label parsing
-  vision.py            Box detection, OCR, and highlighted image generation
+apps/
+  shoe-store/          Product-entry/store app, API, frontend, and SQL schema
+data/
+  images/              Local OCR input/output workspace
+  samples/             Example OCR output files
+src/
+  shoe_ocr/
+    __main__.py        Enables `python -m shoe_ocr` after install
+    cli.py             Argument parsing and command-line flow
+    config.py          Model names, limits, and regex constants
+    reporting.py       Plain-text report formatting
+    text.py            OCR cleanup and label parsing
+    vision.py          Box detection, OCR, and highlighted image generation
 tests/
   test_shoe_box_ocr.py Unit tests for parsing, OCR helpers, and annotation
-samples/               Example output files
-images/                Local image/output workspace
+shoe_box_ocr.py        Compatibility CLI wrapper for older commands/imports
+pyproject.toml         Python package metadata
+requirements.txt       Runtime dependencies with the PyTorch CUDA index
 ```
 
 The root `shoe_box_ocr.py` re-exports the main helpers so older imports and
 commands continue to work.
 
+The shoe-store application has its own README at `apps/shoe-store/README.md`.
+
+To run the shoe-store backend plus both frontends from the repository root:
+
+```powershell
+.\setup.ps1
+```
+
+Or with Bash:
+
+```bash
+./setup.sh
+```
+
 ## Setup
 
 ```powershell
 python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 The Grounding DINO and EasyOCR model files download automatically on the first
@@ -50,6 +71,7 @@ python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_
 python shoe_box_ocr.py C:\images\carton.jpg
 python shoe_box_ocr.py C:\images\carton.jpg --output C:\results\carton.txt
 python -m shoe_ocr C:\images\carton.jpg
+shoe-box-ocr C:\images\carton.jpg
 ```
 
 By default, an annotated image is saved next to the text report:

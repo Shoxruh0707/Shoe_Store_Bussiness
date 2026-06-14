@@ -1,0 +1,175 @@
+{
+  "box_count": 8,
+  "product_box_count": 5,
+  "boxes": [
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {},
+      "raw_text": "7T\nLS\n03",
+      "rotation": 0,
+      "has_product_data": false,
+      "detection": {
+        "label": "cardboard shoe box shoe box carton box",
+        "score": 0.3027,
+        "box": [
+          219,
+          0,
+          1786,
+          348
+        ]
+      }
+    },
+    {
+      "art_no": "CF005",
+      "colour": "LBEIGE",
+      "sizes": {
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1
+      },
+      "raw_text": "WLN\nART N#:\nCF005\nART NO:\nCF005\nCOLOR;\nLBEIGE\nCOLOR:\nLLBEIGE\n37 38 39 40\n37 38 39 40\n1 2 2 1\n1 2 2 1\nPRS\nQTY:\n6\nPRS\nQTY:\n6\nKGS\nN.W:\nKGS\nN.W:\nKGS\nG.W:\nKCS\nG.W:\n65X17 X30CM\nMEAS:\n65X17 X30CM\nMEAS:\nW9 08X LL XS9 'SVJW\nART NO:\nCF 005\nSDH\n'M'9\nS9H\n'MN\nCOLOR:\nL.BEIGE\nSHD\n9\n37 38 39 40\n1 2 2 1\nOP 68 88 L&\nQTY:\n1W118*7\nPRS\n6\n'4070:\nN.W:\nKGS\nG.W:\nKGS\nMEAS: 65X 17 X 30CM",
+      "rotation": 270,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box shoe box carton box",
+        "score": 0.3669,
+        "box": [
+          231,
+          0,
+          1921,
+          1350
+        ]
+      }
+    },
+    {
+      "art_no": "CFO05",
+      "colour": "LBEIGE",
+      "sizes": {
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1
+      },
+      "raw_text": "ART N#:\nCFO05\nCOLOR:\nLBEIGE\n37 38 39 40\n1 2 2 1\nPRS\nQTY:\n6\nKGS\nN.W:\nKGS\nG.W:\n65X17 X30CM\nMEAS:",
+      "rotation": 270,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box shoe box carton box",
+        "score": 0.3383,
+        "box": [
+          376,
+          260,
+          1170,
+          718
+        ]
+      }
+    },
+    {
+      "art_no": "CF005",
+      "colour": "L.BEIGE",
+      "sizes": {
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1
+      },
+      "raw_text": "ART NO:\nCF 005\nCOLOR;\nL.BEIGE\n37 38 39 40\n1 2 2 1\nQTY:\nPRS\n6\nN.W:\nKGS\nG.W:\nKGS\nMEAS; 65X 17 X30CM",
+      "rotation": 270,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3305,
+        "box": [
+          1122,
+          269,
+          1866,
+          713
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {},
+      "raw_text": "",
+      "rotation": 0,
+      "has_product_data": false,
+      "detection": {
+        "label": "cardboard shoe box carton box",
+        "score": 0.2183,
+        "box": [
+          0,
+          430,
+          465,
+          1350
+        ]
+      }
+    },
+    {
+      "art_no": "CF005",
+      "colour": "LBEIGE",
+      "sizes": {
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1
+      },
+      "raw_text": "ART NO;\nCF005\nCOLOR;\nLBEIGE\n37 38 39 40\n1 2 2 1\nQTY:\nPRS\n6\nN.W:\nKGS\nG.W:\nKGS\nMEAS: 65X 17 X 30 CM",
+      "rotation": 90,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3074,
+        "box": [
+          1129,
+          650,
+          1863,
+          1083
+        ]
+      }
+    },
+    {
+      "art_no": "CF005",
+      "colour": "L.BEIGE",
+      "sizes": {
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1
+      },
+      "raw_text": "ART NO:\nCF 005\nCOLOR:\nL.BEIGE\n37 38 39 40\n1 2 2 1\nPRS\nQTY:\n6\nKGS\nN.W:\nKCS\nG.W:\n65X17 X 30CM\nMEAS:",
+      "rotation": 270,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.2947,
+        "box": [
+          403,
+          663,
+          1176,
+          1093
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {},
+      "raw_text": "",
+      "rotation": 0,
+      "has_product_data": false,
+      "detection": {
+        "label": "cardboard shoe box shoe box carton box",
+        "score": 0.2917,
+        "box": [
+          419,
+          999,
+          1914,
+          1350
+        ]
+      }
+    }
+  ]
+}

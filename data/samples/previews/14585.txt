@@ -1,0 +1,325 @@
+{
+  "box_count": 14,
+  "product_box_count": 13,
+  "boxes": [
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {
+        "36": 0,
+        "37": 0,
+        "38": 2,
+        "39": 2,
+        "40": 0,
+        "41": 0
+      },
+      "raw_text": "8\nEHL\nART NO:\nCOLOUR:\nSIZE: 36.37 38 39 40 41\n2\n2\nQTY:\nPRS\nN,W:\nKGS\nG.W:\nKGS\nMEAS: 6 4 X( 7 %31 CH",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box carton box",
+        "score": 0.3494,
+        "box": [
+          1571,
+          57,
+          1884,
+          624
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": "PRS",
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "raw_text": "EFL\nART NO::\nSILVER\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n1 2 2 1\nPRS\nQTY:\nKGS\nNW:\nKGS\nG.W:\nMEAS: 8 4 X{ 7 *31 CM",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3683,
+        "box": [
+          1329,
+          78,
+          1666,
+          663
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "raw_text": "EFL\nART NO::\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n1 2 2 1\nQTY:\nPRS\nN.W:\nKGS\nG.W:\nKGS\nMEAS: 64 X (\"\n130CM",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.4002,
+        "box": [
+          1033,
+          81,
+          1396,
+          700
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": "GREY",
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "raw_text": "EFL\nGREY\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n2 2 1\n1\nPRS\nQTY:\nKGS\n6.W:\nKGS\nMEAS: 6 4 5(7 %31 CM",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3546,
+        "box": [
+          1830,
+          82,
+          2152,
+          629
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {
+        "36": 0,
+        "37": 0,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "raw_text": "EAI\nART NO::\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n2 2 1\nQTY:\nPRS\nKGS\nG.W:\nKGS",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box carton box",
+        "score": 0.3321,
+        "box": [
+          2099,
+          95,
+          2383,
+          639
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": "PRS",
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "raw_text": "EHL\nARTNO::\nCOLOUR:\nSIZE: 36 37 38 39 40 41\n1 2 2 1\nPRS\nQY:\nKGS\nM:\nKGS\nMEAS: 6 4 X( 7 X31 CM",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box carton box",
+        "score": 0.3555,
+        "box": [
+          1599,
+          580,
+          1914,
+          1124
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "41": 0
+      },
+      "raw_text": "EFL\nART NO::\nCOLOUR:\nSIZE: 36 37 38 39 4 41\n2\n2\n1\nRS\nQTY:\nIS\nNW:\nGS\n6,W:\nMEAS: 6 4 X(7 X31 G",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3713,
+        "box": [
+          1847,
+          582,
+          2178,
+          1166
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": "COLOUR",
+      "sizes": {},
+      "raw_text": "EFL\nEFC\nWHITE\n3\nNO::\nART\n3\nCOLOUR:\n86.37 38 39.40.41\nSIZE:\nCOLOUR:\n2 2\n1\n1\nSIZE: 36 37 38\nPRS\n2\n1\nKGS\nQTY:\nKGS\nNW:\nG.W:\nY3 { CM\nG.W:\nMEAS: 5 $ XI 7",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box shoe box carton box",
+        "score": 0.4002,
+        "box": [
+          68,
+          595,
+          672,
+          1307
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": "PRS",
+      "sizes": {
+        "36": 0,
+        "37": 1,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "raw_text": "ERL\"\nART\nNO::\nCOLOUR:\nSIZE: 36, 37 38 39 40 41\n1 2 2 1\nPRS\nQTY:\nKGS\n.W:\nKGS\n6.6\nMEAS: 64X ( 7 X3 ( CM",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3519,
+        "box": [
+          2123,
+          603,
+          2400,
+          1156
+        ]
+      }
+    },
+    {
+      "art_no": "LIZEZZD",
+      "colour": null,
+      "sizes": {},
+      "raw_text": "EFL\nNO =\nART\nLIZEZZD SLVER\nCOLOUR:\nSIZE: 36 37. 38 39 40.41\n2\n1\n2\nPRS\n3\nQTY;\n9\nKGS\nNW:\nKGS\nG.W:\nMEAS: 64X (7 %3 ( C",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3684,
+        "box": [
+          1344,
+          615,
+          1677,
+          1200
+        ]
+      }
+    },
+    {
+      "art_no": "SILVER",
+      "colour": "SILVER",
+      "sizes": {},
+      "raw_text": "EFL\nART NO:\nSILVER\nCOLOUR:\nSIZE:\n2 2\n1\nPRS\nQTY:\nKGS\nN.W:\nKGS\nG.W:\n64X(J X3( CM\nMEAS;",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3899,
+        "box": [
+          747,
+          663,
+          1126,
+          1323
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": "SILVER",
+      "sizes": {
+        "36": 0,
+        "38": 2,
+        "40": 0,
+        "41": 0
+      },
+      "raw_text": "EFI\nART NO::\nCOLOUR:\nSILVER\nSIZE: 36.87 38.89.40.41\n2\n2\nPRS\nQTY;\nKGS\nN.W:\nKGS\nG.W:\nMEAS: 64X (J %3( CM",
+      "rotation": 180,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3891,
+        "box": [
+          1052,
+          666,
+          1412,
+          1271
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {
+        "36": 0,
+        "37": 0,
+        "38": 2,
+        "39": 2,
+        "40": 1,
+        "41": 0
+      },
+      "raw_text": "EAC\n7\nART NO:\nCOLOUR:\nSIZE: 36,37 38 39 40 41\n2 2 1\n1A\nPRS\nQTY:\nKGS\nN.W:\nKGS\nG.W:\nMEAS: 5 < XT7 * 31 CM",
+      "rotation": 0,
+      "has_product_data": true,
+      "detection": {
+        "label": "cardboard shoe box box carton box",
+        "score": 0.3713,
+        "box": [
+          447,
+          677,
+          824,
+          1336
+        ]
+      }
+    },
+    {
+      "art_no": null,
+      "colour": null,
+      "sizes": {},
+      "raw_text": "",
+      "rotation": 0,
+      "has_product_data": false,
+      "detection": {
+        "label": "cardboard box cart",
+        "score": 0.1965,
+        "box": [
+          1666,
+          1064,
+          2051,
+          1350
+        ]
+      }
+    }
+  ]
+}
