@@ -54,7 +54,7 @@ function cleanText(value) {
 }
 
 function parsePositiveNumber(value) {
-  const number = Number(value);
+  const number = Number(String(value ?? "").replace(/\./g, ""));
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
@@ -63,18 +63,21 @@ function normalizeSeasons(seasons) {
   return [...new Set(source.map(cleanText).filter((season) => SEASONS.includes(season)))];
 }
 
-function seasonForDatabase(seasons) {
-  const normalized = normalizeSeasons(seasons);
-  if (normalized.length !== 1) return "all_season";
-  return SEASON_DB_VALUES[normalized[0]];
+function seasonsForDatabase(seasons) {
+  return normalizeSeasons(seasons).map((season) => SEASON_DB_VALUES[season]);
 }
 
-function seasonForClient(value) {
-  const season = cleanText(value);
-  if (!season) return [];
-  if (season.toLowerCase() === "all_season") return [...SEASONS];
-  const found = Object.entries(SEASON_DB_VALUES).find(([, dbValue]) => dbValue === season.toLowerCase());
-  return found ? [found[0]] : [];
+function seasonsForClient(value) {
+  const seasons = String(value || "")
+    .split(",")
+    .map(cleanText)
+    .filter(Boolean);
+
+  if (seasons.some((season) => season.toLowerCase() === "all_season")) return [...SEASONS];
+
+  return seasons
+    .map((season) => Object.entries(SEASON_DB_VALUES).find(([, dbValue]) => dbValue === season.toLowerCase())?.[0])
+    .filter(Boolean);
 }
 
 function normalizeInventoryRows(rows) {
@@ -106,6 +109,7 @@ function validateProductPayload(payload) {
   const type = cleanText(payload.type);
   const seasons = normalizeSeasons(payload.seasons);
   const price = parsePositiveNumber(payload.price);
+  const landingPrice = parsePositiveNumber(payload.landingPrice);
   const colour = cleanText(payload.colour);
   const material = cleanText(payload.material);
   const inventory = normalizeInventoryRows(payload.inventory);
@@ -115,6 +119,7 @@ function validateProductPayload(payload) {
   if (!SHOE_TYPES.includes(type)) return { error: "To'g'ri oyoq kiyim turini tanlang." };
   if (!seasons.length) return { error: "Kamida bitta mavsum tanlang." };
   if (price === null) return { error: "Narx musbat son bo'lishi kerak." };
+  if (landingPrice === null) return { error: "Kelish narxi musbat son bo'lishi kerak." };
   if (!colour) return { error: "Rang kiritilishi kerak." };
   if (!material) return { error: "Material kiritilishi kerak." };
 
@@ -125,6 +130,7 @@ function validateProductPayload(payload) {
       type,
       seasons,
       price,
+      landingPrice,
       colour,
       material,
       inventory,
@@ -231,6 +237,14 @@ async function writeInventoryRows(connection, variantId, price, inventory) {
   }
 }
 
+async function writeProductSeasons(connection, productId, seasons) {
+  await connection.execute("DELETE FROM product_seasons WHERE product_id = ?", [productId]);
+
+  for (const season of seasonsForDatabase(seasons)) {
+    await connection.execute("INSERT INTO product_seasons (product_id, season) VALUES (?, ?)", [productId, season]);
+  }
+}
+
 async function addInventoryRows(connection, variantId, price, inventory) {
   const rowsToAdd = inventory.filter((row) => row.quantity > 0);
   if (!rowsToAdd.length) return;
@@ -295,7 +309,10 @@ async function fetchProduct(id) {
        p.art_no AS artNo,
        p.name,
        st.type,
-       p.season,
+       (SELECT GROUP_CONCAT(ps.season ORDER BY ps.season SEPARATOR ',')
+        FROM product_seasons ps
+       WHERE ps.product_id = p.id) AS seasonValues,
+       p.landing_price AS landingPrice,
        p.price,
        p.created_at AS createdAt,
        p.updated_at AS updatedAt,
@@ -311,7 +328,7 @@ async function fetchProduct(id) {
      LEFT JOIN inventory i ON i.product_variant_id = pv.id
      WHERE p.id = ?
      GROUP BY
-       p.id, p.art_no, p.name, st.type, p.season, p.price, p.created_at, p.updated_at,
+       p.id, p.art_no, p.name, st.type, p.landing_price, p.price, p.created_at, p.updated_at,
        pv.id, c.colour_name, m.material_type`,
     [id]
   );
@@ -330,7 +347,7 @@ async function fetchProduct(id) {
 
   return {
     ...product,
-    seasons: seasonForClient(product.season),
+    seasons: seasonsForClient(product.seasonValues),
     inventory: inventoryRows,
     images: imageRows
   };
@@ -370,13 +387,20 @@ app.get("/api/products", async (_request, response, next) => {
          p.art_no AS artNo,
          p.name,
          st.type,
-         p.season,
+         (SELECT GROUP_CONCAT(ps.season ORDER BY ps.season SEPARATOR ',')
+          FROM product_seasons ps
+          WHERE ps.product_id = p.id) AS seasonValues,
+         p.landing_price AS landingPrice,
          p.price,
          p.created_at AS createdAt,
          p.updated_at AS updatedAt,
          GROUP_CONCAT(DISTINCT c.colour_name ORDER BY c.colour_name SEPARATOR ', ') AS colours,
          GROUP_CONCAT(DISTINCT m.material_type ORDER BY m.material_type SEPARATOR ', ') AS materials,
-         GROUP_CONCAT(DISTINCT CASE WHEN i.quantity > 0 THEN i.size END ORDER BY CAST(i.size AS UNSIGNED) SEPARATOR ', ') AS availableSizes,
+         GROUP_CONCAT(
+           DISTINCT CASE WHEN i.quantity > 0 THEN CONCAT(i.size, 'x', i.quantity) END
+           ORDER BY CAST(i.size AS UNSIGNED)
+           SEPARATOR ', '
+         ) AS availableSizes,
          COALESCE(SUM(i.quantity), 0) AS quantity
        FROM products p
        LEFT JOIN shoe_type st ON st.id = p.type_id
@@ -384,14 +408,14 @@ app.get("/api/products", async (_request, response, next) => {
        LEFT JOIN colours c ON c.id = pv.colour_id
        LEFT JOIN materials m ON m.id = pv.material_id
        LEFT JOIN inventory i ON i.product_variant_id = pv.id
-       GROUP BY p.id, p.art_no, p.name, st.type, p.season, p.price, p.created_at, p.updated_at
+       GROUP BY p.id, p.art_no, p.name, st.type, p.landing_price, p.price, p.created_at, p.updated_at
        ORDER BY p.updated_at DESC, p.created_at DESC`
     );
 
     response.json(
       rows.map((row) => ({
         ...row,
-        seasons: seasonForClient(row.season)
+        seasons: seasonsForClient(row.seasonValues)
       }))
     );
   } catch (error) {
@@ -466,9 +490,9 @@ app.post("/api/products", async (request, response, next) => {
     }
 
     const [productInsert] = await connection.execute(
-      `INSERT INTO products (art_no, name, brand_id, type_id, season, price, created_at, updated_at)
+      `INSERT INTO products (art_no, name, brand_id, type_id, landing_price, price, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [data.artNo, data.name || data.artNo, brandId, typeId, seasonForDatabase(data.seasons), data.price]
+      [data.artNo, data.name || data.artNo, brandId, typeId, data.landingPrice, data.price]
     );
 
     const [variantInsert] = await connection.execute(
@@ -476,6 +500,7 @@ app.post("/api/products", async (request, response, next) => {
       [productInsert.insertId, colourId, materialId]
     );
 
+    await writeProductSeasons(connection, productInsert.insertId, data.seasons);
     await writeInventoryRows(connection, variantInsert.insertId, data.price, data.inventory);
     await saveProductImages(connection, variantInsert.insertId, data.images);
     await connection.commit();
@@ -521,9 +546,9 @@ app.put("/api/products/:id", async (request, response, next) => {
 
     await connection.execute(
       `UPDATE products
-       SET art_no = ?, name = ?, brand_id = ?, type_id = ?, season = ?, price = ?, updated_at = NOW()
+       SET art_no = ?, name = ?, brand_id = ?, type_id = ?, landing_price = ?, price = ?, updated_at = NOW()
        WHERE id = ?`,
-      [data.artNo, data.name || data.artNo, brandId, typeId, seasonForDatabase(data.seasons), data.price, productId]
+      [data.artNo, data.name || data.artNo, brandId, typeId, data.landingPrice, data.price, productId]
     );
 
     let variantId = existing.variantId;
@@ -540,6 +565,7 @@ app.put("/api/products/:id", async (request, response, next) => {
       variantId = variantInsert.insertId;
     }
 
+    await writeProductSeasons(connection, productId, data.seasons);
     await writeInventoryRows(connection, variantId, data.price, data.inventory);
     await saveProductImages(connection, variantId, data.images);
     await connection.commit();

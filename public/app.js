@@ -60,6 +60,7 @@ const cameraStrip = document.querySelector("#cameraStrip");
 const artNoInput = document.querySelector("#artNo");
 const nameInput = document.querySelector("#name");
 const priceInput = document.querySelector("#price");
+const landingPriceInput = document.querySelector("#landingPrice");
 const colourInput = document.querySelector("#colour");
 const materialInput = document.querySelector("#material");
 const productsTable = document.querySelector("#productsTable");
@@ -190,24 +191,11 @@ function setDetailsDisabled(disabled) {
   nameInput.disabled = disabled;
   typeSelect.disabled = disabled;
   priceInput.disabled = disabled;
+  landingPriceInput.disabled = disabled;
   imageInput.disabled = disabled;
   openCameraButton.disabled = disabled;
   seasonButtons.querySelectorAll(".season-button").forEach((button) => {
     button.disabled = disabled;
-  });
-}
-
-function syncTypeFromArtNo() {
-  if (productIdInput.value || state.stockMatch) return;
-
-  const hasArtNo = Boolean(artNoInput.value.trim());
-  if (hasArtNo) {
-    typeSelect.value = state.meta.shoeTypes.includes("Basanochka") ? "Basanochka" : state.meta.shoeTypes[0] || "";
-  }
-  typeSelect.disabled = hasArtNo;
-  priceInput.disabled = hasArtNo;
-  seasonButtons.querySelectorAll(".season-button").forEach((button) => {
-    button.disabled = hasArtNo;
   });
 }
 
@@ -216,7 +204,6 @@ function clearStockMatch() {
   state.currentImages = [];
   state.capturedImages = [];
   setDetailsDisabled(false);
-  syncTypeFromArtNo();
   renderImageList([]);
   formTitle.textContent = "Mahsulot qo'shish";
 }
@@ -231,11 +218,28 @@ function resetForm() {
   setInventoryRows([]);
 }
 
-function formatCurrency(value) {
-  return Number(value || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
+function digitsOnly(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function formatMoneyInput(value) {
+  const digits = digitsOnly(value);
+  if (!digits) return "";
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+function moneyPayloadValue(input) {
+  return digitsOnly(input.value) || "0";
+}
+
+function bindMoneyInput(input) {
+  input.addEventListener("input", () => {
+    input.value = formatMoneyInput(input.value);
   });
+}
+
+function formatCurrency(value) {
+  return formatMoneyInput(Math.trunc(Number(value || 0)));
 }
 
 function formatDate(value) {
@@ -372,8 +376,6 @@ function capturePhoto() {
 async function checkStockMatch() {
   if (productIdInput.value) return;
 
-  syncTypeFromArtNo();
-
   const artNo = artNoInput.value.trim();
   const colour = colourInput.value.trim();
   const material = materialInput.value.trim();
@@ -399,7 +401,8 @@ async function checkStockMatch() {
   state.stockMatch = product;
   nameInput.value = product.name || "";
   typeSelect.value = product.type || state.meta.shoeTypes[0] || "";
-  priceInput.value = product.price || 0;
+  priceInput.value = formatMoneyInput(product.price || 0);
+  landingPriceInput.value = formatMoneyInput(product.landingPrice || 0);
   setSelectedSeasons(product.seasons || []);
   imageInput.value = "";
   state.capturedImages = [];
@@ -427,6 +430,7 @@ function renderProducts() {
       product.materials,
       product.availableSizes,
       product.price,
+      product.landingPrice,
       product.quantity
     ]
       .join(" ")
@@ -470,7 +474,8 @@ async function productPayload() {
     name: nameInput.value,
     type: typeSelect.value,
     seasons: getSelectedSeasons(),
-    price: priceInput.value,
+    price: moneyPayloadValue(priceInput),
+    landingPrice: moneyPayloadValue(landingPriceInput),
     colour: colourInput.value,
     material: materialInput.value,
     inventory: getInventoryRows(),
@@ -489,7 +494,8 @@ async function editProduct(id) {
   artNoInput.value = product.artNo || "";
   nameInput.value = product.name || "";
   typeSelect.value = product.type || state.meta.shoeTypes[0] || "";
-  priceInput.value = product.price || 0;
+  priceInput.value = formatMoneyInput(product.price || 0);
+  landingPriceInput.value = formatMoneyInput(product.landingPrice || 0);
   colourInput.value = product.colour || "";
   materialInput.value = product.material || "";
   setSelectedSeasons(product.seasons || []);
@@ -552,13 +558,14 @@ sizeGrid.addEventListener("click", (event) => {
   updateTotalQuantity();
 });
 imageInput.addEventListener("change", () => renderImageList());
+bindMoneyInput(priceInput);
+bindMoneyInput(landingPriceInput);
 openCameraButton.addEventListener("click", () => openCamera());
 capturePhotoButton.addEventListener("click", capturePhoto);
 cameraDoneButton.addEventListener("click", closeCamera);
 closeCameraButton.addEventListener("click", closeCamera);
 searchInput.addEventListener("input", renderProducts);
 resetButton.addEventListener("click", resetForm);
-artNoInput.addEventListener("input", syncTypeFromArtNo);
 artNoInput.addEventListener("change", () => checkStockMatch().catch((error) => setStatus(error.message, "error")));
 colourInput.addEventListener("change", () => checkStockMatch().catch((error) => setStatus(error.message, "error")));
 materialInput.addEventListener("change", () => checkStockMatch().catch((error) => setStatus(error.message, "error")));
