@@ -13,17 +13,56 @@
           <p class="eyebrow">Sotuvchi paneli</p>
           <h1>Ombor</h1>
         </div>
-        <div class="status" id="status">Baza tekshirilmoqda...</div>
+        <div class="topbar-actions">
+          <div class="status" id="status">Baza tekshirilmoqda...</div>
+          <button class="ghost-button" type="button" id="signoutButton">Chiqish</button>
+        </div>
       </section>
 
-      <section class="workspace">
+      <section class="workspace search-workspace">
+        <section class="table-panel">
+          <div class="table-header">
+            <div>
+              <h2>Mahsulotlar</h2>
+              <p id="productCount">0 ta mahsulot</p>
+            </div>
+            <div class="table-actions">
+              <input id="search" placeholder="Artno, rang, material bo'yicha qidirish...">
+              <button class="add-product-button" type="button" id="addProductButton" aria-label="Mahsulot qo'shish">+</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Artno</th>
+                  <th>Rang</th>
+                  <th>Material</th>
+                  <th>Razmerlar</th>
+                  <th>Soni</th>
+                  <th>Narx</th>
+                </tr>
+              </thead>
+              <tbody id="productsTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div class="drawer-backdrop" id="productDrawer" hidden>
+      <aside class="product-drawer" aria-label="Mahsulot formasi">
         <form class="product-form" id="productForm">
           <div class="form-header">
             <div>
               <h2 id="formTitle">Mahsulot qo'shish</h2>
               <p>Yaratilgan va yangilangan vaqt avtomatik saqlanadi.</p>
             </div>
-            <button class="ghost-button" type="button" id="resetButton">Yangi</button>
+            <div class="drawer-actions">
+              <button class="ghost-button" type="button" id="resetButton">Yangi</button>
+              <button class="ghost-button close-drawer-button" type="button" id="closeFormButton" aria-label="Yopish">x</button>
+            </div>
           </div>
 
           <input type="hidden" id="productId">
@@ -94,34 +133,8 @@
             <button class="danger-button" type="button" id="deleteButton" disabled>O'chirish</button>
           </div>
         </form>
-
-        <section class="table-panel">
-          <div class="table-header">
-            <div>
-              <h2>Mahsulotlar</h2>
-              <p id="productCount">0 ta mahsulot</p>
-            </div>
-            <input id="search" placeholder="Artno, rang, material bo'yicha qidirish...">
-          </div>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Artno</th>
-                  <th>Rang</th>
-                  <th>Material</th>
-                  <th>Razmerlar</th>
-                  <th>Soni</th>
-                  <th>Narx</th>
-                </tr>
-              </thead>
-              <tbody id="productsTable"></tbody>
-            </table>
-          </div>
-        </section>
-      </section>
-    </main>
+      </aside>
+    </div>
 
     <div class="camera-panel" id="cameraPanel" hidden>
       <div class="camera-view">

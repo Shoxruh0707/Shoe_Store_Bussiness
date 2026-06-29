@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ro'yxatdan o'tish | Oyoq kiyim ombori</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <section class="auth-panel">
+        <div class="auth-header">
+          <p class="eyebrow">Ombor tizimi</p>
+          <h1>Ro'yxatdan o'tish</h1>
+        </div>
+
+        <nav class="auth-tabs" aria-label="Auth pages">
+          <a class="auth-tab" href="/signin">Sign in</a>
+          <a class="auth-tab active" href="/signup" aria-current="page">Sign up</a>
+        </nav>
+
+        <form class="auth-form" id="signupForm">
+          <div class="field-grid single-on-small">
+            <label>
+              <span>Ism</span>
+              <input id="fname" name="fname" maxlength="20" autocomplete="given-name" required>
+            </label>
+            <label>
+              <span>Familiya</span>
+              <input id="lname" name="lname" maxlength="20" autocomplete="family-name" required>
+            </label>
+            <label>
+              <span>Telefon raqam</span>
+              <input id="signupPhone" name="phoneNumber" autocomplete="tel" required>
+            </label>
+            <label>
+              <span>Rol</span>
+              <select id="role" name="role" required>
+                <option value="customer">Customer</option>
+                <option value="store_owner">Admin</option>
+              </select>
+            </label>
+            <label>
+              <span>Parol</span>
+              <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+            </label>
+            <label>
+              <span>Parolni tasdiqlash</span>
+              <input id="passwordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" minlength="8" required>
+            </label>
+          </div>
+          <button class="primary-button" type="submit">Davom etish</button>
+        </form>
+
+        <p class="auth-switch">Account bormi? <a href="/signin">Sign in</a></p>
+
+        <div class="status auth-status" id="authStatus" hidden></div>
+      </section>
+    </main>
+    <script src="/signup.js"></script>
+  </body>
+</html>

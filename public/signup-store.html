@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Do'kon ma'lumotlari | Oyoq kiyim ombori</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <section class="auth-panel">
+        <div class="auth-header">
+          <p class="eyebrow">Admin ro'yxati</p>
+          <h1>Do'kon ma'lumotlari</h1>
+        </div>
+
+        <form class="auth-form" id="storeSignupForm">
+          <label>
+            <span>Store Name yoki Store Number</span>
+            <input id="storeName" name="storeName" maxlength="50" required>
+          </label>
+          <label>
+            <span>Store Image <em>ixtiyoriy</em></span>
+            <input id="storeImage" name="storeImage" type="file" accept="image/*">
+          </label>
+          <label>
+            <span>Phone Number</span>
+            <input id="storePhoneNumber" name="storePhoneNumber" autocomplete="tel" required>
+          </label>
+          <label>
+            <span>Description <em>ixtiyoriy</em></span>
+            <textarea id="description" name="description" rows="4"></textarea>
+          </label>
+          <label>
+            <span>Telegram username</span>
+            <div class="telegram-field">
+              <input id="telegramUsername" name="telegramUsername" placeholder="username" required>
+              <strong id="telegramStatus" aria-live="polite">?</strong>
+            </div>
+          </label>
+
+          <div class="form-actions">
+            <a class="ghost-button button-link" href="/signup">Ortga</a>
+            <button class="primary-button" type="submit">Yakunlash</button>
+          </div>
+        </form>
+
+        <div class="status auth-status" id="authStatus" hidden></div>
+      </section>
+    </main>
+    <script src="/signup-store.js"></script>
+  </body>
+</html>

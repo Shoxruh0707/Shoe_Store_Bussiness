@@ -42,7 +42,11 @@ const productIdInput = document.querySelector("#productId");
 const formTitle = document.querySelector("#formTitle");
 const deleteButton = document.querySelector("#deleteButton");
 const resetButton = document.querySelector("#resetButton");
+const addProductButton = document.querySelector("#addProductButton");
+const closeFormButton = document.querySelector("#closeFormButton");
+const productDrawer = document.querySelector("#productDrawer");
 const statusEl = document.querySelector("#status");
+const signoutButton = document.querySelector("#signoutButton");
 const typeSelect = document.querySelector("#type");
 const seasonButtons = document.querySelector("#seasonButtons");
 const sizeGrid = document.querySelector("#sizeGrid");
@@ -73,6 +77,16 @@ const emptyTemplate = document.querySelector("#emptyRowTemplate");
 function setStatus(message, className = "") {
   statusEl.textContent = message;
   statusEl.className = `status ${className}`.trim();
+}
+
+function openProductDrawer() {
+  productDrawer.hidden = false;
+  document.body.classList.add("drawer-open");
+}
+
+function closeProductDrawer() {
+  productDrawer.hidden = true;
+  document.body.classList.remove("drawer-open");
 }
 
 async function api(path, options = {}) {
@@ -484,6 +498,7 @@ async function productPayload() {
 }
 
 async function editProduct(id) {
+  openProductDrawer();
   const product = await api(`/api/products/${id}`);
   state.stockMatch = null;
   setDetailsDisabled(false);
@@ -510,8 +525,19 @@ async function init() {
   resetForm();
 
   try {
+    const session = await api("/api/auth/me");
+    if (!["store_owner", "admin"].includes(session.user.role) || !session.store) {
+      window.location.replace(session.user.role === "customer" ? "/customer" : "/signup");
+      return;
+    }
+    setStatus(`${session.store.storeName} ombori`, "ok");
+  } catch (_error) {
+    window.location.replace("/signin");
+    return;
+  }
+
+  try {
     await api("/api/health");
-    setStatus("Bazaga ulandi", "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -565,7 +591,26 @@ capturePhotoButton.addEventListener("click", capturePhoto);
 cameraDoneButton.addEventListener("click", closeCamera);
 closeCameraButton.addEventListener("click", closeCamera);
 searchInput.addEventListener("input", renderProducts);
-resetButton.addEventListener("click", resetForm);
+addProductButton.addEventListener("click", () => {
+  resetForm();
+  openProductDrawer();
+  artNoInput.focus();
+});
+closeFormButton.addEventListener("click", closeProductDrawer);
+productDrawer.addEventListener("click", (event) => {
+  if (event.target === productDrawer) closeProductDrawer();
+});
+resetButton.addEventListener("click", () => {
+  resetForm();
+  artNoInput.focus();
+});
+signoutButton.addEventListener("click", async () => {
+  try {
+    await api("/api/auth/signout", { method: "POST" });
+  } finally {
+    window.location.replace("/signin");
+  }
+});
 artNoInput.addEventListener("change", () => checkStockMatch().catch((error) => setStatus(error.message, "error")));
 colourInput.addEventListener("change", () => checkStockMatch().catch((error) => setStatus(error.message, "error")));
 materialInput.addEventListener("change", () => checkStockMatch().catch((error) => setStatus(error.message, "error")));
@@ -574,6 +619,12 @@ productsTable.addEventListener("click", (event) => {
   const row = event.target.closest("tr[data-id]");
   if (!row) return;
   editProduct(row.dataset.id).catch((error) => setStatus(error.message, "error"));
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !productDrawer.hidden) {
+    closeProductDrawer();
+  }
 });
 
 form.addEventListener("keydown", (event) => {
@@ -601,6 +652,7 @@ form.addEventListener("submit", async (event) => {
     });
 
     resetForm();
+    closeProductDrawer();
     await loadProducts();
     setStatus("Mahsulot saqlandi", "ok");
   } catch (error) {
@@ -618,6 +670,7 @@ deleteButton.addEventListener("click", async () => {
   try {
     await api(`/api/products/${id}`, { method: "DELETE" });
     resetForm();
+    closeProductDrawer();
     await loadProducts();
     setStatus("Mahsulot o'chirildi", "ok");
   } catch (error) {

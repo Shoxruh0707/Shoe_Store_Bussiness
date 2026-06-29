@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kirish | Oyoq kiyim ombori</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <section class="auth-panel">
+        <div class="auth-header">
+          <p class="eyebrow">Ombor tizimi</p>
+          <h1>Tizimga kirish</h1>
+        </div>
+
+        <nav class="auth-tabs" aria-label="Auth pages">
+          <a class="auth-tab active" href="/signin" aria-current="page">Sign in</a>
+          <a class="auth-tab" href="/signup">Sign up</a>
+        </nav>
+
+        <form class="auth-form" id="signinForm">
+          <label>
+            <span>Telefon raqam</span>
+            <input id="signinPhone" name="phoneNumber" autocomplete="tel" required>
+          </label>
+          <label>
+            <span>Parol</span>
+            <input id="signinPassword" name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button class="primary-button" type="submit">Kirish</button>
+        </form>
+
+        <p class="auth-switch">Account yo'qmi? <a href="/signup">Sign up</a></p>
+
+        <div class="status auth-status" id="authStatus" hidden></div>
+      </section>
+    </main>
+    <script src="/signin.js"></script>
+  </body>
+</html>
