@@ -16,8 +16,14 @@ const defaultOwnerPhone = process.env.DEFAULT_OWNER_PHONE || "+998000000001";
 const defaultPasswordHash =
   process.env.DEFAULT_OWNER_PASSWORD_HASH || "$2b$10$0000000000000000000000000000000000000000000000000000";
 const sessionSecret = process.env.SESSION_SECRET || "change-this-session-secret";
-const passwordIterations = 120000;
-const signupEnabled = process.env.SIGNUP_ENABLED === "true";
+const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN || "";
+const telegramAuthMaxAgeSeconds = Number(process.env.TELEGRAM_AUTH_MAX_AGE_SECONDS || 86400);
+const apiAuthRequired = process.env.API_AUTH_REQUIRED !== "false";
+const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:3001").replace(/\/$/, "");
+const corsOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 const SHOE_TYPES = [
   "Basanochka",
@@ -48,8 +54,64 @@ const IMAGE_MIME_EXTENSIONS = {
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+const PAGE_PATHS = new Set(["/", "/inventory"]);
+
+function decodePathSafely(value) {
+  let decoded = value;
+
+  for (let index = 0; index < 2; index += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch (_error) {
+      break;
+    }
+  }
+
+  return decoded;
+}
+
+function normalizePagePath(value) {
+  const decodedPath = decodePathSafely(value);
+  const normalizedPath = decodedPath.replace(/[\\\/\s]+$/g, "") || "/";
+  return PAGE_PATHS.has(normalizedPath) ? normalizedPath : "";
+}
+
+app.use((request, response, next) => {
+  const queryIndex = request.originalUrl.indexOf("?");
+  const rawPath = queryIndex === -1 ? request.originalUrl : request.originalUrl.slice(0, queryIndex);
+  const query = queryIndex === -1 ? "" : request.originalUrl.slice(queryIndex);
+  const normalizedPath = normalizePagePath(rawPath);
+
+  if (normalizedPath !== rawPath && PAGE_PATHS.has(normalizedPath)) {
+    response.redirect(302, `${normalizedPath}${query}`);
+    return;
+  }
+
+  next();
+});
+
 app.use(express.json({ limit: "25mb" }));
-app.use(express.static(path.join(__dirname, "public"), { index: false }));
+app.use("/uploads", express.static(UPLOAD_DIR));
+
+app.use((request, response, next) => {
+  const origin = request.get("Origin");
+  if (origin && corsOrigins.includes(origin)) {
+    response.setHeader("Access-Control-Allow-Origin", origin);
+    response.setHeader("Vary", "Origin");
+    response.setHeader("Access-Control-Allow-Credentials", "true");
+    response.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Telegram-Init-Data");
+    response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  }
+
+  if (request.method === "OPTIONS") {
+    response.status(204).end();
+    return;
+  }
+
+  next();
+});
 
 function cleanText(value) {
   if (value === null || value === undefined) return "";
@@ -112,35 +174,14 @@ function clearSessionCookie(response) {
   response.setHeader("Set-Cookie", "session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
 }
 
-function hashPassword(password) {
-  const salt = crypto.randomBytes(8).toString("hex");
-  const hash = crypto.pbkdf2Sync(password, salt, passwordIterations, 20, "sha256").toString("hex");
-  return `p2$${salt}$${hash}`;
-}
-
-function verifyPassword(password, storedHash) {
-  if (!storedHash || !storedHash.startsWith("p2$")) return false;
-  const [, salt, hash] = storedHash.split("$");
-  if (!salt || !hash) return false;
-  const candidate = crypto.pbkdf2Sync(password, salt, passwordIterations, 20, "sha256").toString("hex");
-  if (Buffer.byteLength(candidate) !== Buffer.byteLength(hash)) return false;
-  return crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(hash));
-}
-
 function parsePositiveNumber(value) {
   const number = Number(String(value ?? "").replace(/\./g, ""));
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
-function normalizeRole(value) {
-  return cleanText(value).toLowerCase() === "admin" || cleanText(value).toLowerCase() === "store_owner"
-    ? "store_owner"
-    : "customer";
-}
-
 function validatePhone(value) {
   const phone = cleanText(value);
-  return /^\+?[0-9\s-]{7,15}$/.test(phone) ? phone : "";
+  return /^\+?[0-9\s-]{7,20}$/.test(phone) ? phone : "";
 }
 
 function validateTelegramUsername(value) {
@@ -179,6 +220,25 @@ function normalizeInventoryRows(rows) {
       quantity: Number(row.quantity || 0)
     }))
     .filter((row) => SIZES.includes(row.size) && Number.isInteger(row.quantity) && row.quantity >= 0);
+}
+
+function inventoryForClient(rows) {
+  const quantitiesBySize = new Map(
+    (Array.isArray(rows) ? rows : []).map((row) => [cleanText(row.size), Number(row.quantity || 0)])
+  );
+
+  return SIZES.map((size) => ({
+    size: Number(size),
+    quantity: quantitiesBySize.get(size) || 0
+  }));
+}
+
+function apiData(response, data, statusCode = 200) {
+  response.status(statusCode).json({ success: true, data });
+}
+
+function apiMessage(response, message, statusCode = 400) {
+  response.status(statusCode).json({ success: false, error: message, message });
 }
 
 function normalizeImages(images) {
@@ -300,7 +360,13 @@ async function getOrCreateLookup(connection, table, idColumn, valueColumn, value
 
 async function ensureDefaultStore(connection) {
   const [stores] = await connection.execute("SELECT id FROM store WHERE id = ? LIMIT 1", [defaultStoreId]);
-  if (stores.length) return defaultStoreId;
+  if (!stores.length) {
+    await connection.execute(
+      `INSERT INTO store (id, store_name, is_active)
+       VALUES (?, ?, TRUE)`,
+      [defaultStoreId, defaultStoreName]
+    );
+  }
 
   const [owners] = await connection.execute("SELECT id FROM users WHERE phone_number = ? LIMIT 1", [defaultOwnerPhone]);
   let ownerId = owners[0]?.id;
@@ -309,15 +375,15 @@ async function ensureDefaultStore(connection) {
     const [ownerInsert] = await connection.execute(
       `INSERT INTO users (fname, lname, phone_number, password_hash, role)
        VALUES (?, ?, ?, ?, ?)`,
-      ["Default", "Owner", defaultOwnerPhone, defaultPasswordHash, "store_owner"]
+      ["Default", "Owner", defaultOwnerPhone, defaultPasswordHash, "seller"]
     );
     ownerId = ownerInsert.insertId;
   }
 
   await connection.execute(
-    `INSERT INTO store (id, store_name, owner_id, is_active)
-     VALUES (?, ?, ?, TRUE)`,
-    [defaultStoreId, defaultStoreName, ownerId]
+    `INSERT IGNORE INTO store_users (user_id, store_id, role)
+     VALUES (?, ?, 'owner')`,
+    [ownerId, defaultStoreId]
   );
 
   return defaultStoreId;
@@ -325,33 +391,142 @@ async function ensureDefaultStore(connection) {
 
 async function storeForUser(userId) {
   const [stores] = await pool.execute(
-    "SELECT id, store_name AS storeName FROM store WHERE owner_id = ? AND is_active = TRUE ORDER BY id LIMIT 1",
+    `SELECT
+       s.id,
+       s.store_name AS storeName,
+       su.role AS storeRole
+     FROM store_users su
+     INNER JOIN store s ON s.id = su.store_id
+     WHERE su.user_id = ?
+       AND s.is_active = TRUE
+     ORDER BY FIELD(su.role, 'owner', 'manager', 'staff'), s.id
+     LIMIT 1`,
     [userId]
   );
   return stores[0] || null;
 }
 
+function verifyTelegramInitData(initData) {
+  if (!telegramBotToken) {
+    throw Object.assign(new Error("TELEGRAM_BOT_TOKEN sozlanmagan."), { statusCode: 500 });
+  }
+
+  const params = new URLSearchParams(String(initData || ""));
+  const receivedHash = params.get("hash");
+  if (!receivedHash) {
+    throw Object.assign(new Error("Telegram initData hash topilmadi."), { statusCode: 401 });
+  }
+
+  params.delete("hash");
+  const dataCheckString = [...params.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+
+  const secretKey = crypto.createHmac("sha256", "WebAppData").update(telegramBotToken).digest();
+  const calculatedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+
+  if (
+    Buffer.byteLength(receivedHash) !== Buffer.byteLength(calculatedHash) ||
+    !crypto.timingSafeEqual(Buffer.from(receivedHash), Buffer.from(calculatedHash))
+  ) {
+    throw Object.assign(new Error("Telegram imzosi noto'g'ri."), { statusCode: 401 });
+  }
+
+  const authDate = Number(params.get("auth_date") || 0);
+  if (!authDate || Math.floor(Date.now() / 1000) - authDate > telegramAuthMaxAgeSeconds) {
+    throw Object.assign(new Error("Telegram sessiyasi eskirgan. Botdan qayta oching."), { statusCode: 401 });
+  }
+
+  let telegramUser = {};
+  try {
+    telegramUser = JSON.parse(params.get("user") || "{}");
+  } catch (_error) {
+    throw Object.assign(new Error("Telegram foydalanuvchi ma'lumoti noto'g'ri."), { statusCode: 401 });
+  }
+  if (!telegramUser.id) {
+    throw Object.assign(new Error("Telegram foydalanuvchi ma'lumoti topilmadi."), { statusCode: 401 });
+  }
+
+  return {
+    id: Number(telegramUser.id),
+    username: cleanText(telegramUser.username),
+    firstName: cleanText(telegramUser.first_name),
+    lastName: cleanText(telegramUser.last_name),
+    photoUrl: cleanText(telegramUser.photo_url)
+  };
+}
+
+async function userForTelegramId(telegramId) {
+  const [users] = await pool.execute(
+    `SELECT
+       id,
+       fname,
+       lname,
+       phone_number AS phoneNumber,
+       role,
+       telegram_id AS telegramId
+     FROM users
+     WHERE telegram_id = ?
+     LIMIT 1`,
+    [telegramId]
+  );
+  return users[0] || null;
+}
+
+async function hydrateAuthenticatedUser(user, response) {
+  if (response) setSessionCookie(response, user);
+  return {
+    user,
+    store: ["admin", "seller"].includes(user.role) ? await storeForUser(user.id) : null
+  };
+}
+
 async function requireAuth(request, response, next) {
   try {
+    if (!apiAuthRequired) {
+      request.user = {
+        id: 0,
+        fname: "Development",
+        lname: "User",
+        phoneNumber: defaultOwnerPhone,
+        role: "admin"
+      };
+      request.store = { id: defaultStoreId, storeName: defaultStoreName };
+      next();
+      return;
+    }
+
     const session = readSession(request);
-    if (!session) {
-      response.status(401).json({ message: "Tizimga kiring." });
+    let userId = session?.userId;
+
+    if (!userId) {
+      const initData = request.get("X-Telegram-Init-Data");
+      if (initData) {
+        const telegramUser = verifyTelegramInitData(initData);
+        const telegramAccount = await userForTelegramId(telegramUser.id);
+        userId = telegramAccount?.id;
+      }
+    }
+
+    if (!userId) {
+      apiMessage(response, "Telegram orqali botdan qayta kiring.", 401);
       return;
     }
 
     const [users] = await pool.execute(
       "SELECT id, fname, lname, phone_number AS phoneNumber, role FROM users WHERE id = ? LIMIT 1",
-      [session.userId]
+      [userId]
     );
 
     if (!users.length) {
       clearSessionCookie(response);
-      response.status(401).json({ message: "Tizimga qayta kiring." });
+      apiMessage(response, "Tizimga qayta kiring.", 401);
       return;
     }
 
     request.user = users[0];
-    request.store = request.user.role === "store_owner" || request.user.role === "admin" ? await storeForUser(request.user.id) : null;
+    request.store = ["admin", "seller"].includes(request.user.role) ? await storeForUser(request.user.id) : null;
     next();
   } catch (error) {
     next(error);
@@ -359,13 +534,13 @@ async function requireAuth(request, response, next) {
 }
 
 function requireStoreOwner(request, response, next) {
-  if (!request.user || !["store_owner", "admin"].includes(request.user.role)) {
-    response.status(403).json({ message: "Bu sahifa faqat adminlar uchun." });
+  if (!request.user || !["admin", "seller"].includes(request.user.role)) {
+    apiMessage(response, "Bu sahifa faqat adminlar uchun.", 403);
     return;
   }
 
   if (!request.store) {
-    response.status(403).json({ message: "Avval do'kon ro'yxatdan o'tkazilishi kerak." });
+    apiMessage(response, "Avval do'kon ro'yxatdan o'tkazilishi kerak.", 403);
     return;
   }
 
@@ -441,6 +616,19 @@ async function findMatchingProductVariant(connection, data, colourId, materialId
   return matches[0] || null;
 }
 
+async function findProductByArtNo(connection, artNo) {
+  const [matches] = await connection.execute(
+    `SELECT p.id AS productId
+     FROM products p
+     WHERE p.art_no = ?
+     ORDER BY p.updated_at DESC, p.created_at DESC
+     LIMIT 1`,
+    [artNo]
+  );
+
+  return matches[0] || null;
+}
+
 async function findMatchingProductByText(artNo, colour, material) {
   const [matches] = await pool.execute(
     `SELECT p.id AS productId
@@ -459,7 +647,68 @@ async function findMatchingProductByText(artNo, colour, material) {
   return matches[0] || null;
 }
 
-async function fetchProduct(id, storeId = defaultStoreId) {
+async function fetchProductLookupByArtNo(artNo, storeId = defaultStoreId) {
+  const [rows] = await pool.execute(
+    `SELECT
+       p.id,
+       p.art_no AS artNo,
+       p.name,
+       st.type,
+       (SELECT GROUP_CONCAT(ps.season ORDER BY ps.season SEPARATOR ',')
+        FROM product_seasons ps
+        WHERE ps.product_id = p.id) AS seasonValues,
+       p.landing_price AS landingPrice,
+       p.price,
+       pv.id AS variantId,
+       c.colour_name AS colour,
+       m.material_type AS material,
+       COALESCE(SUM(i.quantity), 0) AS quantity
+     FROM products p
+     LEFT JOIN shoe_type st ON st.id = p.type_id
+     LEFT JOIN product_variant pv ON pv.product_id = p.id
+     LEFT JOIN colours c ON c.id = pv.colour_id
+     LEFT JOIN materials m ON m.id = pv.material_id
+     LEFT JOIN inventory i ON i.product_variant_id = pv.id AND i.store_id = ?
+     WHERE p.art_no = ?
+     GROUP BY
+       p.id, p.art_no, p.name, st.type, p.landing_price, p.price,
+       pv.id, c.colour_name, m.material_type
+     ORDER BY p.updated_at DESC, p.created_at DESC, pv.updated_at DESC, pv.created_at DESC`,
+    [storeId, artNo]
+  );
+
+  if (!rows.length) return null;
+
+  const product = rows[0];
+  const variants = rows
+    .filter((row) => row.variantId)
+    .map((row) => ({
+      productId: row.id,
+      variantId: row.variantId,
+      colour: row.colour,
+      material: row.material,
+      quantity: Number(row.quantity || 0)
+    }));
+
+  return {
+    product: {
+      id: product.id,
+      artNo: product.artNo,
+      name: product.name,
+      type: product.type,
+      seasons: seasonsForClient(product.seasonValues),
+      landingPrice: product.landingPrice,
+      price: product.price
+    },
+    colours: [...new Set(variants.map((variant) => variant.colour).filter(Boolean))],
+    materials: [...new Set(variants.map((variant) => variant.material).filter(Boolean))],
+    variants
+  };
+}
+
+async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
+  const variantFilter = variantId ? "AND pv.id = ?" : "";
+  const params = variantId ? [storeId, id, variantId] : [storeId, id];
   const [rows] = await pool.execute(
     `SELECT
        p.id,
@@ -484,10 +733,11 @@ async function fetchProduct(id, storeId = defaultStoreId) {
      LEFT JOIN materials m ON m.id = pv.material_id
      LEFT JOIN inventory i ON i.product_variant_id = pv.id AND i.store_id = ?
      WHERE p.id = ?
+       ${variantFilter}
      GROUP BY
        p.id, p.art_no, p.name, st.type, p.landing_price, p.price, p.created_at, p.updated_at,
        pv.id, c.colour_name, m.material_type`,
-    [storeId, id]
+    params
   );
 
   if (!rows.length) return null;
@@ -505,61 +755,17 @@ async function fetchProduct(id, storeId = defaultStoreId) {
   return {
     ...product,
     seasons: seasonsForClient(product.seasonValues),
-    inventory: inventoryRows,
+    inventory: inventoryForClient(inventoryRows),
     images: imageRows
   };
 }
 
-app.get("/", (request, response) => {
-  const session = readSession(request);
-  response.redirect(session ? "/inventory" : "/signin");
+app.get("/", (_request, response) => {
+  response.redirect(`${frontendUrl}/inventory`);
 });
 
-app.get("/signin", (request, response) => {
-  const session = readSession(request);
-  if (session) {
-    response.redirect(session.role === "customer" ? "/customer" : "/inventory");
-    return;
-  }
-
-  response.sendFile(path.join(__dirname, "public", "signin.html"));
-});
-
-app.get("/signup", (request, response) => {
-  const session = readSession(request);
-  if (session) {
-    response.redirect(session.role === "customer" ? "/customer" : "/inventory");
-    return;
-  }
-
-  if (!signupEnabled) {
-    response.redirect("/signin");
-    return;
-  }
-
-  response.sendFile(path.join(__dirname, "public", "signup.html"));
-});
-
-app.get("/signup/store", (_request, response) => {
-  if (!signupEnabled) {
-    response.redirect("/signin");
-    return;
-  }
-
-  response.sendFile(path.join(__dirname, "public", "signup-store.html"));
-});
-
-app.get("/customer", (_request, response) => {
-  response.sendFile(path.join(__dirname, "public", "customer.html"));
-});
-
-app.get("/inventory", (request, response) => {
-  const session = readSession(request);
-  if (!session) {
-    response.redirect("/signin");
-    return;
-  }
-  response.sendFile(path.join(__dirname, "public", "index.html"));
+app.get("/inventory", (_request, response) => {
+  response.redirect(`${frontendUrl}/inventory`);
 });
 
 app.get("/api/auth/me", requireAuth, (request, response) => {
@@ -569,158 +775,32 @@ app.get("/api/auth/me", requireAuth, (request, response) => {
   });
 });
 
-app.post("/api/auth/signin", async (request, response, next) => {
-  try {
-    const phoneNumber = validatePhone(request.body.phoneNumber);
-    const password = String(request.body.password || "");
-
-    if (!phoneNumber || !password) {
-      response.status(400).json({ message: "Telefon raqam va parol kiritilishi kerak." });
-      return;
-    }
-
-    const [users] = await pool.execute(
-      "SELECT id, fname, lname, phone_number AS phoneNumber, password_hash AS passwordHash, role FROM users WHERE phone_number = ? LIMIT 1",
-      [phoneNumber]
-    );
-
-    const user = users[0];
-    if (!user || !verifyPassword(password, user.passwordHash)) {
-      response.status(401).json({ message: "Telefon raqam yoki parol noto'g'ri." });
-      return;
-    }
-
-    setSessionCookie(response, user);
-    const store = user.role === "store_owner" || user.role === "admin" ? await storeForUser(user.id) : null;
-    const needsStoreRegistration = user.role !== "customer" && !store;
-    response.json({
-      redirectTo: user.role === "customer" ? "/customer" : needsStoreRegistration && signupEnabled ? "/signup/store" : "/inventory",
-      user: { id: user.id, fname: user.fname, lname: user.lname, phoneNumber: user.phoneNumber, role: user.role },
-      store
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
 app.post("/api/auth/signout", (_request, response) => {
   clearSessionCookie(response);
   response.status(204).end();
 });
 
-app.post("/api/auth/signup", async (request, response, next) => {
-  if (!signupEnabled) {
-    response.status(403).json({ message: "Ro'yxatdan o'tish hozircha o'chirilgan." });
-    return;
-  }
-
-  const fname = cleanText(request.body.fname);
-  const lname = cleanText(request.body.lname);
-  const phoneNumber = validatePhone(request.body.phoneNumber);
-  const password = String(request.body.password || "");
-  const passwordConfirm = String(request.body.passwordConfirm || "");
-  const role = normalizeRole(request.body.role);
-
-  if (!fname || !lname || fname.length > 20 || lname.length > 20) {
-    response.status(400).json({ message: "Ism va familiya 1-20 belgidan iborat bo'lishi kerak." });
-    return;
-  }
-
-  if (!phoneNumber) {
-    response.status(400).json({ message: "Telefon raqam noto'g'ri." });
-    return;
-  }
-
-  if (password.length < 8 || password !== passwordConfirm) {
-    response.status(400).json({ message: "Parol kamida 8 belgi bo'lishi va takroriy parol bilan mos kelishi kerak." });
-    return;
-  }
-
-  const connection = await pool.getConnection();
-
+app.post("/api/telegram/auth", async (request, response, next) => {
   try {
-    await connection.beginTransaction();
+    const telegramUser = verifyTelegramInitData(request.body.initData);
+    const user = await userForTelegramId(telegramUser.id);
 
-    const [userInsert] = await connection.execute(
-      `INSERT INTO users (fname, lname, phone_number, password_hash, role)
-       VALUES (?, ?, ?, ?, ?)`,
-      [fname, lname, phoneNumber, hashPassword(password), role]
-    );
-
-    let store = null;
-    if (role === "store_owner") {
-      const storeName = cleanText(request.body.storeName);
-      const storePhoneNumber = validatePhone(request.body.storePhoneNumber);
-      const description = cleanText(request.body.description);
-      const telegramUsername = validateTelegramUsername(request.body.telegramUsername);
-      const storeImage = normalizeOptionalImage(request.body.storeImage);
-
-      if (!storeName || storeName.length > 50) {
-        throw Object.assign(new Error("Do'kon nomi 1-50 belgidan iborat bo'lishi kerak."), { statusCode: 400 });
-      }
-
-      if (!storePhoneNumber) {
-        throw Object.assign(new Error("Do'kon telefon raqami noto'g'ri."), { statusCode: 400 });
-      }
-
-      if (!telegramUsername) {
-        throw Object.assign(new Error("Telegram username 5-32 belgi, harf/raqam/_ bo'lishi kerak."), { statusCode: 400 });
-      }
-
-      const imagePath = storeImage ? await saveImageFile(storeImage) : null;
-      const [storeInsert] = await connection.execute(
-        `INSERT INTO store (store_name, owner_id, is_active, store_image, phone_number, description, telegram_username)
-         VALUES (?, ?, TRUE, ?, ?, ?, ?)`,
-        [storeName, userInsert.insertId, imagePath, storePhoneNumber, description || null, telegramUsername]
-      );
-      store = { id: storeInsert.insertId, storeName };
+    if (!user) {
+      response.status(403).json({
+        registered: false,
+        message: "Avval Telegram bot orqali ro'yxatdan o'ting."
+      });
+      return;
     }
 
-    await connection.commit();
-
-    const user = { id: userInsert.insertId, fname, lname, phoneNumber, role };
-    setSessionCookie(response, user);
-    response.status(201).json({
-      redirectTo: role === "customer" ? "/customer" : "/inventory",
-      user,
-      store
-    });
+    const auth = await hydrateAuthenticatedUser(user, response);
+    response.json({ registered: true, ...auth });
   } catch (error) {
-    await connection.rollback();
     if (error.statusCode) {
       response.status(error.statusCode).json({ message: error.message });
       return;
     }
     next(error);
-  } finally {
-    connection.release();
-  }
-});
-
-app.get("/api/telegram/check", async (request, response) => {
-  const username = validateTelegramUsername(request.query.username);
-  if (!username) {
-    response.status(400).json({ exists: false, message: "Telegram username formati noto'g'ri." });
-    return;
-  }
-
-  try {
-    const telegramResponse = await fetch(`https://t.me/${encodeURIComponent(username)}`, {
-      method: "GET",
-      redirect: "manual"
-    });
-    response.json({
-      exists: telegramResponse.status >= 200 && telegramResponse.status < 400,
-      checked: true,
-      reliable: false
-    });
-  } catch (_error) {
-    response.json({
-      exists: false,
-      checked: false,
-      reliable: false,
-      message: "Telegram tekshiruvi hozircha ishlamadi."
-    });
   }
 });
 
@@ -738,7 +818,8 @@ app.get("/api/meta", requireAuth, requireStoreOwner, async (_request, response, 
     const [colours] = await pool.execute("SELECT colour_name AS colour FROM colours ORDER BY colour_name");
     const [materials] = await pool.execute("SELECT material_type AS material FROM materials ORDER BY material_type");
 
-    response.json({
+    apiData(response, {
+      types: SHOE_TYPES,
       shoeTypes: SHOE_TYPES,
       seasons: SEASONS,
       sizes: SIZES,
@@ -755,42 +836,17 @@ app.get("/api/products", requireAuth, requireStoreOwner, async (request, respons
     const storeId = currentStoreId(request);
     const [rows] = await pool.execute(
       `SELECT
-         p.id,
-         p.art_no AS artNo,
-         p.name,
-         st.type,
-         (SELECT GROUP_CONCAT(ps.season ORDER BY ps.season SEPARATOR ',')
-          FROM product_seasons ps
-          WHERE ps.product_id = p.id) AS seasonValues,
-         p.landing_price AS landingPrice,
-         p.price,
-         p.created_at AS createdAt,
-         p.updated_at AS updatedAt,
-         GROUP_CONCAT(DISTINCT c.colour_name ORDER BY c.colour_name SEPARATOR ', ') AS colours,
-         GROUP_CONCAT(DISTINCT m.material_type ORDER BY m.material_type SEPARATOR ', ') AS materials,
-         GROUP_CONCAT(
-           DISTINCT CASE WHEN i.quantity > 0 THEN CONCAT(i.size, 'x', i.quantity) END
-           ORDER BY CAST(i.size AS UNSIGNED)
-           SEPARATOR ', '
-         ) AS availableSizes,
-         COALESCE(SUM(i.quantity), 0) AS quantity
+         p.id
        FROM products p
-       LEFT JOIN shoe_type st ON st.id = p.type_id
        INNER JOIN product_variant pv ON pv.product_id = p.id
-       LEFT JOIN colours c ON c.id = pv.colour_id
-       LEFT JOIN materials m ON m.id = pv.material_id
-       INNER JOIN inventory i ON i.product_variant_id = pv.id AND i.store_id = ?
-       GROUP BY p.id, p.art_no, p.name, st.type, p.landing_price, p.price, p.created_at, p.updated_at
+       LEFT JOIN inventory i ON i.product_variant_id = pv.id AND i.store_id = ?
+       GROUP BY p.id
        ORDER BY p.updated_at DESC, p.created_at DESC`,
       [storeId]
     );
 
-    response.json(
-      rows.map((row) => ({
-        ...row,
-        seasons: seasonsForClient(row.seasonValues)
-      }))
-    );
+    const products = (await Promise.all(rows.map((row) => fetchProduct(row.id, storeId)))).filter(Boolean);
+    apiData(response, products);
   } catch (error) {
     next(error);
   }
@@ -803,17 +859,32 @@ app.get("/api/products/match", requireAuth, requireStoreOwner, async (request, r
     const material = cleanText(request.query.material);
 
     if (!artNo || !colour || !material) {
-      response.json({ match: null });
+      apiData(response, []);
       return;
     }
 
     const match = await findMatchingProductByText(artNo, colour, material);
     if (!match) {
-      response.json({ match: null });
+      apiData(response, []);
       return;
     }
 
-    response.json({ match: await fetchProduct(match.productId, currentStoreId(request)) });
+    apiData(response, [await fetchProduct(match.productId, currentStoreId(request))].filter(Boolean));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/products/lookup", requireAuth, requireStoreOwner, async (request, response, next) => {
+  try {
+    const artNo = cleanText(request.query.artNo);
+
+    if (!artNo) {
+      apiData(response, null);
+      return;
+    }
+
+    apiData(response, await fetchProductLookupByArtNo(artNo, currentStoreId(request)));
   } catch (error) {
     next(error);
   }
@@ -823,10 +894,10 @@ app.get("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
   try {
     const product = await fetchProduct(request.params.id, currentStoreId(request));
     if (!product) {
-      response.status(404).json({ message: "Mahsulot topilmadi." });
+      apiMessage(response, "Mahsulot topilmadi.", 404);
       return;
     }
-    response.json(product);
+    apiData(response, product);
   } catch (error) {
     next(error);
   }
@@ -835,7 +906,7 @@ app.get("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
 app.post("/api/products", requireAuth, requireStoreOwner, async (request, response, next) => {
   const validation = validateProductPayload(request.body);
   if (validation.error) {
-    response.status(400).json({ message: validation.error });
+    apiMessage(response, validation.error, 400);
     return;
   }
 
@@ -859,7 +930,32 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
       await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [existing.variantId]);
       await connection.commit();
 
-      response.json(await fetchProduct(existing.productId, storeId));
+      apiData(response, {
+        ...(await fetchProduct(existing.productId, storeId, existing.variantId)),
+        inventoryIncremented: true
+      });
+      return;
+    }
+
+    const existingProduct = await findProductByArtNo(connection, data.artNo);
+    if (existingProduct) {
+      const [variantInsert] = await connection.execute(
+        "INSERT INTO product_variant (product_id, colour_id, material_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
+        [existingProduct.productId, colourId, materialId]
+      );
+
+      await connection.execute(
+        `UPDATE products
+         SET name = ?, type_id = ?, landing_price = ?, price = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [data.name || data.artNo, typeId, data.landingPrice, data.price, existingProduct.productId]
+      );
+      await writeProductSeasons(connection, existingProduct.productId, data.seasons);
+      await writeInventoryRows(connection, variantInsert.insertId, data.price, data.inventory, storeId);
+      await saveProductImages(connection, variantInsert.insertId, data.images);
+      await connection.commit();
+
+      apiData(response, await fetchProduct(existingProduct.productId, storeId, variantInsert.insertId), 201);
       return;
     }
 
@@ -879,7 +975,7 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
     await saveProductImages(connection, variantInsert.insertId, data.images);
     await connection.commit();
 
-    response.status(201).json(await fetchProduct(productInsert.insertId, storeId));
+    apiData(response, await fetchProduct(productInsert.insertId, storeId), 201);
   } catch (error) {
     await connection.rollback();
     next(error);
@@ -891,7 +987,7 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
 app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, response, next) => {
   const validation = validateProductPayload(request.body);
   if (validation.error) {
-    response.status(400).json({ message: validation.error });
+    apiMessage(response, validation.error, 400);
     return;
   }
 
@@ -910,7 +1006,7 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
 
     if (!existing) {
       await connection.rollback();
-      response.status(404).json({ message: "Mahsulot topilmadi." });
+      apiMessage(response, "Mahsulot topilmadi.", 404);
       return;
     }
 
@@ -945,7 +1041,7 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
     await saveProductImages(connection, variantId, data.images);
     await connection.commit();
 
-    response.json(await fetchProduct(productId, storeId));
+    apiData(response, await fetchProduct(productId, storeId));
   } catch (error) {
     await connection.rollback();
     next(error);
@@ -976,11 +1072,11 @@ app.delete("/api/products/:id", requireAuth, requireStoreOwner, async (request, 
     await connection.commit();
 
     if (!deletedRows) {
-      response.status(404).json({ message: "Bu do'konda mahsulot topilmadi." });
+      apiMessage(response, "Bu do'konda mahsulot topilmadi.", 404);
       return;
     }
 
-    response.status(204).end();
+    apiData(response, { id: productId });
   } catch (error) {
     await connection.rollback();
     next(error);
@@ -992,6 +1088,8 @@ app.delete("/api/products/:id", requireAuth, requireStoreOwner, async (request, 
 app.use((error, _request, response, _next) => {
   console.error(error);
   response.status(500).json({
+    success: false,
+    error: readableDatabaseError(error),
     message: readableDatabaseError(error),
     detail: error.message
   });

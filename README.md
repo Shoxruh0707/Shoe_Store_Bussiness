@@ -1,12 +1,13 @@
 # Admin Shoe Store Inventory
 
-Inventory web app for managing shoe products, stock, auth, and store ownership backed by MySQL.
+Inventory web app for managing shoe products, stock, Telegram authentication, and store ownership backed by MySQL.
 
 ## What This Project Runs
 
 - Backend: Node.js + Express
 - Database: MySQL 8+
-- Frontend: Static pages served from `public/`
+- Frontend: Next.js app in `frontend/`
+- Authentication: Telegram Bot + Telegram Mini App
 - Public tunnel: optional ngrok on port `3000`
 
 ## Start Backend
@@ -25,11 +26,31 @@ Inventory web app for managing shoe products, stock, auth, and store ownership b
    npm start
    ```
 
-4. Open the app:
+4. Start the frontend in a second terminal:
 
-   ```text
-   http://localhost:3000
+   ```powershell
+   npm run frontend:dev
    ```
+
+5. Start the Telegram bot in another terminal when you need Telegram auth:
+
+   ```powershell
+   npm run bot
+   ```
+
+5. Open the app from Telegram by pressing the bot's `📦 Open Inventory` button.
+
+For local Telegram testing, expose the frontend with HTTPS and set `TELEGRAM_WEBAPP_URL` to the public `/inventory` URL. The frontend proxies `/api` requests to the backend.
+
+```powershell
+E:\AdminShoeStore\tools\ngrok\ngrok.exe http 3001 --log=stdout
+```
+
+The Mini App URL should look like:
+
+```text
+https://your-ngrok-domain.ngrok-free.app/inventory
+```
 
 ## Development Mode
 
@@ -37,6 +58,12 @@ Use watch mode when you want the server to restart automatically after file edit
 
 ```powershell
 npm run dev
+```
+
+Run the redesigned frontend separately:
+
+```powershell
+npm run frontend:dev
 ```
 
 ## Restart Backend
@@ -76,28 +103,26 @@ taskkill /PID <PID_FROM_NETSTAT> /F
 npm start
 ```
 
-## Sign In and Sign Up
+## Telegram Authentication
 
-- Sign in page: `/signin`
-- Sign up page: `/signup`
-- Admin store signup page: `/signup/store`
+Traditional website sign-in and signup pages have been removed. Users start in the Telegram bot, complete onboarding there, and open `/inventory` as a Telegram Mini App.
 
-Signup is controlled by:
+The bot collects:
 
-```env
-SIGNUP_ENABLED=true
-```
-
-Set it to `false` to disable registration.
+- first name
+- last name
+- phone number through Telegram's native contact share button
+- account type: Seller or Store Owner
+- store name, phone, and description for Store Owner accounts
 
 ## ngrok
 
 The project has been used with ngrok to expose the local backend.
 
-Run ngrok against the app port:
+Run ngrok against the frontend app port:
 
 ```powershell
-E:\AdminShoeStore\tools\ngrok\ngrok.exe http 3000 --log=stdout
+E:\AdminShoeStore\tools\ngrok\ngrok.exe http 3001 --log=stdout
 ```
 
 ngrok local inspector:
@@ -114,7 +139,7 @@ Recommended `.env` values:
 
 ```env
 PORT=3000
-SIGNUP_ENABLED=true
+FRONTEND_URL=http://localhost:3001
 
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -123,6 +148,15 @@ DB_PASSWORD=your_password_here
 DB_NAME=shoes_store_db
 
 SESSION_SECRET=replace_with_a_long_random_value
+
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_BOT_USERNAME=
+TELEGRAM_WEBAPP_URL=https://your-public-domain.example/inventory
+TELEGRAM_AUTH_MAX_AGE_SECONDS=86400
+TELEGRAM_POLL_TIMEOUT_SECONDS=25
+
+API_AUTH_REQUIRED=true
+CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
 
 DEFAULT_STORE_ID=1
 DEFAULT_STORE_NAME=Default Store
@@ -133,14 +167,24 @@ DEFAULT_BRAND_NAME=Unbranded
 
 Notes:
 
-- `SIGNUP_ENABLED` controls whether signup is available.
-- `SESSION_SECRET` signs the session cookie.
+- `TELEGRAM_BOT_TOKEN` is used to verify Mini App `initData`; never commit it.
+- `TELEGRAM_WEBAPP_URL` must point to the HTTPS `/inventory` URL configured for the bot.
+- `FRONTEND_URL` is where the backend redirects page requests.
+- `API_AUTH_REQUIRED=false` is useful only for local frontend testing without Telegram auth.
+- `SESSION_SECRET` signs the internal app session cookie created after Telegram verification.
 - `DEFAULT_STORE_ID` is used by the legacy/default product flow.
 - `DEFAULT_BRAND_NAME` is used because the current product form does not ask for brand.
 
 ## Database Setup
 
-Import the schema from `shoes_store_database_ddl.sql` into MySQL 8+.
+For a new database, import the schema from `shoes_store_database_ddl.sql` into MySQL 8+.
+
+For an existing database, run:
+
+```sql
+migrations/2026_07_01_add_telegram_auth_to_users.sql
+migrations/2026_07_05_add_product_landing_price.sql
+```
 
 Expected tables include:
 
@@ -162,23 +206,15 @@ Expected tables include:
 
 ## Backend Routes
 
-Useful pages:
-
-- `/`
-- `/signin`
-- `/signup`
-- `/signup/store`
-- `/customer`
-- `/inventory`
+Page routes are served by the Next.js frontend on port `3001`. The Express backend redirects `/` and `/inventory` to `FRONTEND_URL`.
 
 Useful API endpoints:
 
 - `GET /api/health`
 - `GET /api/meta`
 - `GET /api/auth/me`
-- `POST /api/auth/signin`
 - `POST /api/auth/signout`
-- `POST /api/auth/signup`
+- `POST /api/telegram/auth`
 - `GET /api/products`
 - `POST /api/products`
 - `PUT /api/products/:id`
@@ -186,7 +222,7 @@ Useful API endpoints:
 
 ## Common Troubleshooting
 
-If you see `ENOENT` for `auth.html`, the app is probably still running an old Node process. Stop the old process and start the current code again.
+If `/inventory` says to open from Telegram, use the bot's `📦 Open Inventory` button. A normal browser does not provide Telegram Mini App `initData`.
 
 If the app says the database is unavailable:
 
@@ -201,6 +237,6 @@ If port `3000` is already in use:
 
 ## Notes
 
-- Passwords are stored hashed, not in plain text.
+- Password login is no longer used for new access; retained password hashes are only for migration compatibility.
 - Admin/store-owner inventory is scoped by `store_id`.
-- Telegram username checking is best-effort and not a guaranteed Telegram API validation.
+- Store owner onboarding creates a store automatically. Seller accounts need a store relationship before inventory access can be granted safely.
