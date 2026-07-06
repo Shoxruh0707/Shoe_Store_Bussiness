@@ -66,6 +66,25 @@ Run the redesigned frontend separately:
 npm run frontend:dev
 ```
 
+## Full Stack With Logs
+
+To start or restart the backend, frontend, Telegram bot, and ngrok together, run:
+
+```powershell
+npm run stack:restart
+```
+
+All runtime logs from that command are saved in `logs/`:
+
+- `logs/backend.log`
+- `logs/backend.err.log`
+- `logs/frontend.log`
+- `logs/frontend.err.log`
+- `logs/bot.log`
+- `logs/bot.err.log`
+- `logs/ngrok.log`
+- `logs/ngrok.err.log`
+
 ## Restart Backend
 
 If you changed backend code or `.env`, restart the process.

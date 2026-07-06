@@ -8,7 +8,9 @@
     "dev": "node --watch server.js",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
-    "bot": "node src/telegramBot.js"
+    "bot": "node src/telegramBot.js",
+    "stack:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-stack.ps1",
+    "stack:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-stack.ps1 -Restart"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
