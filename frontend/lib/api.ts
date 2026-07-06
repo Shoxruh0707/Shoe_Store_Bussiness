@@ -23,10 +23,14 @@ export interface ProductImage {
   path?: string;
   type?: string;
   data?: string;
+  tempId?: string;
+  uploading?: boolean;
+  error?: string;
 }
 
 export interface Product {
   id?: number;
+  variantId?: number;
   artNo: string;
   name: string;
   type: string;
@@ -175,6 +179,38 @@ class APIClient {
       `/products/lookup?${params}`
     );
     return response.data || null;
+  }
+
+  async uploadTempProductImage(file: File): Promise<ProductImage> {
+    const data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Failed to read image file'));
+      reader.readAsDataURL(file);
+    });
+
+    const response = await this.request<{ data: { tempId: string; path: string } }>(
+      'POST',
+      '/uploads/temp',
+      {
+        image: {
+          name: file.name,
+          type: file.type,
+          data,
+        },
+      }
+    );
+
+    return {
+      name: file.name,
+      type: file.type,
+      tempId: response.data.tempId,
+      path: response.data.path,
+    };
+  }
+
+  async deleteTempProductImage(tempId: string): Promise<void> {
+    await this.request('DELETE', `/uploads/temp/${encodeURIComponent(tempId)}`);
   }
 
   async createProduct(product: Product): Promise<Product> {

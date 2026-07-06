@@ -1,6 +1,10 @@
 import { useState, useCallback, useEffect } from 'react';
 import { api, Product, Metadata } from '@/lib/api';
 
+function productRowKey(product: Product): string {
+  return product.variantId ? `variant-${product.variantId}` : `product-${product.id}`;
+}
+
 export interface UseProductsReturn {
   products: Product[];
   metadata: Metadata;
@@ -55,7 +59,8 @@ export function useProducts(): UseProductsReturn {
     try {
       const newProduct = await api.createProduct(product);
       setProducts((prev) => {
-        const existingIndex = prev.findIndex((item) => item.id === newProduct.id);
+        const newKey = productRowKey(newProduct);
+        const existingIndex = prev.findIndex((item) => productRowKey(item) === newKey);
         if (existingIndex === -1) return [...prev, newProduct];
 
         return prev.map((item, index) => (index === existingIndex ? newProduct : item));
@@ -73,8 +78,9 @@ export function useProducts(): UseProductsReturn {
     async (id: number, product: Product): Promise<Product | null> => {
       try {
         const updated = await api.updateProduct(id, product);
+        const updatedKey = productRowKey(updated);
         setProducts((prev) =>
-          prev.map((p) => (p.id === id ? updated : p))
+          prev.map((p) => (productRowKey(p) === updatedKey || (!updated.variantId && p.id === id) ? updated : p))
         );
         return updated;
       } catch (err) {

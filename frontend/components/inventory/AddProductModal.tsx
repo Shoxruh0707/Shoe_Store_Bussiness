@@ -19,8 +19,8 @@ type Step = 'basic' | 'details' | 'pricing' | 'images' | 'inventory';
 const STEPS: { id: Step; label: string }[] = [
   { id: 'basic', label: 'Basic Info' },
   { id: 'details', label: 'Details' },
-  { id: 'pricing', label: 'Pricing' },
   { id: 'images', label: 'Images' },
+  { id: 'pricing', label: 'Pricing' },
   { id: 'inventory', label: 'Inventory' },
 ];
 
@@ -57,6 +57,16 @@ export function AddProductModal({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [artLookup, setArtLookup] = useState<ProductLookup | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
+
+  const cleanupTempImages = useCallback((images: Product['images']) => {
+    images
+      .filter((image) => image.tempId)
+      .forEach((image) => {
+        api.deleteTempProductImage(image.tempId!).catch((error) => {
+          console.error('[v0] Failed to delete temporary image:', error);
+        });
+      });
+  }, []);
 
   const handleFieldChange = useCallback((field: keyof Product, value: any) => {
     setFormData((prev) => ({
@@ -99,9 +109,10 @@ export function AddProductModal({
     if (!files) return;
 
     Array.from(files).forEach((file) => {
+      const localId = `${Date.now()}-${file.name}-${Math.random()}`;
       const reader = new FileReader();
-      reader.onload = (event) => {
-        const imageData = event.target?.result as string;
+      reader.onload = async (event) => {
+        const preview = event.target?.result as string;
         setFormData((prev) => ({
           ...prev,
           images: [
@@ -109,23 +120,58 @@ export function AddProductModal({
             {
               name: file.name,
               type: file.type,
-              data: imageData,
-              path: imageData, // Use data URL for preview
+              path: preview,
+              tempId: localId,
+              uploading: true,
             },
           ],
         }));
+
+        try {
+          const uploadedImage = await api.uploadTempProductImage(file);
+          setFormData((prev) => ({
+            ...prev,
+            images: prev.images.map((image) =>
+              image.tempId === localId
+                ? { ...uploadedImage, uploading: false }
+                : image
+            ),
+          }));
+        } catch (error) {
+          setFormData((prev) => ({
+            ...prev,
+            images: prev.images.map((image) =>
+              image.tempId === localId
+                ? {
+                    ...image,
+                    uploading: false,
+                    error: error instanceof Error ? error.message : 'Upload failed',
+                  }
+                : image
+            ),
+          }));
+        }
       };
       reader.readAsDataURL(file);
     });
+    e.currentTarget.value = '';
     setUnsavedChanges(true);
     setSubmitError(null);
   };
 
   const handleRemoveImage = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      images: prev.images.filter((_, i) => i !== index),
-    }));
+    setFormData((prev) => {
+      const image = prev.images[index];
+      if (image?.tempId && !image.uploading && !image.error) {
+        api.deleteTempProductImage(image.tempId).catch((error) => {
+          console.error('[v0] Failed to delete temporary image:', error);
+        });
+      }
+      return {
+        ...prev,
+        images: prev.images.filter((_, i) => i !== index),
+      };
+    });
     setUnsavedChanges(true);
     setSubmitError(null);
   };
@@ -161,9 +207,20 @@ export function AddProductModal({
       setSubmitError('Please select at least one season.');
       return;
     }
+    if (formData.images.some((image) => image.uploading)) {
+      setSubmitError('Please wait until image uploads finish.');
+      return;
+    }
+    if (formData.images.some((image) => image.error)) {
+      setSubmitError('Remove failed image uploads before saving.');
+      return;
+    }
     try {
       setSubmitError(null);
-      await onSave(formData);
+      await onSave({
+        ...formData,
+        images: formData.images.map(({ uploading, error, data, ...image }) => image),
+      });
       setFormData(emptyProductForm());
       setUnsavedChanges(false);
       setArtLookup(null);
@@ -184,6 +241,7 @@ export function AddProductModal({
     setSubmitError(null);
     setArtLookup(null);
     setCurrentStep('basic');
+    cleanupTempImages(formData.images);
     onClose();
   };
 
@@ -205,6 +263,8 @@ export function AddProductModal({
   const totalInventory = formData.inventory.reduce((sum, item) => sum + item.quantity, 0);
   const sellingPrice = Number(formData.price || 0);
   const landingPrice = Number(formData.landingPrice || 0);
+  const hasUploadingImages = formData.images.some((image) => image.uploading);
+  const hasFailedImages = formData.images.some((image) => image.error);
   const hasExistingArt = Boolean(artLookup?.product);
   const suggestedColours = artLookup?.colours || [];
   const suggestedMaterials = normalizedColour
@@ -265,14 +325,17 @@ export function AddProductModal({
   useEffect(() => {
     if (!exactVariant || !artLookup?.product || editingProduct) return;
 
-    setFormData((prev) => ({
-      ...prev,
-      price: artLookup.product.price,
-      landingPrice: artLookup.product.landingPrice,
-      images: [],
-    }));
+    setFormData((prev) => {
+      cleanupTempImages(prev.images);
+      return {
+        ...prev,
+        price: artLookup.product.price,
+        landingPrice: artLookup.product.landingPrice,
+        images: [],
+      };
+    });
     setCurrentStep('inventory');
-  }, [artLookup, editingProduct, exactVariant]);
+  }, [artLookup, cleanupTempImages, editingProduct, exactVariant]);
 
   return (
     <>
@@ -475,7 +538,72 @@ export function AddProductModal({
                 </div>
               )}
 
-              {/* Step 3: Pricing */}
+              {/* Step 3: Images */}
+              {currentStep === 'images' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+                      Product Images
+                    </label>
+                    <div className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-6 text-center dark:border-gray-700 dark:bg-gray-800">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        className="hidden"
+                        id="image-input"
+                      />
+                      <label htmlFor="image-input" className="cursor-pointer">
+                        <div className="flex flex-col items-center">
+                          <Plus className="h-8 w-8 text-gray-400" />
+                          <p className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Click to upload or drag and drop
+                          </p>
+                          <p className="text-xs text-gray-500">PNG, JPG, GIF up to 10MB</p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {formData.images.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+                        Uploaded Images ({formData.images.length})
+                      </p>
+                      {hasUploadingImages && (
+                        <p className="mb-2 text-xs text-blue-600 dark:text-blue-300">
+                          Uploading images in the background...
+                        </p>
+                      )}
+                      <div className="grid grid-cols-3 gap-2">
+                        {formData.images.map((image, index) => (
+                          <div key={index} className="relative aspect-square">
+                            <img
+                              src={image.path || image.data || ''}
+                              alt={`Product ${index + 1}`}
+                              className="h-full w-full rounded-lg object-cover"
+                            />
+                            {(image.uploading || image.error) && (
+                              <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/55 px-2 text-center text-xs font-medium text-white">
+                                {image.uploading ? 'Uploading...' : image.error}
+                              </div>
+                            )}
+                            <button
+                              onClick={() => handleRemoveImage(index)}
+                              className="absolute right-1 top-1 rounded-full bg-red-600 p-1 text-white hover:bg-red-700"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Step 4: Pricing */}
               {currentStep === 'pricing' && (
                 <div className="space-y-4">
                   <div>
@@ -516,61 +644,6 @@ export function AddProductModal({
                       <p className="text-lg font-bold text-blue-700 dark:text-blue-300">
                         {(sellingPrice - landingPrice).toLocaleString()} ({(((sellingPrice - landingPrice) / landingPrice) * 100).toFixed(1)}%)
                       </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Step 4: Images */}
-              {currentStep === 'images' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
-                      Product Images
-                    </label>
-                    <div className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-6 text-center dark:border-gray-700 dark:bg-gray-800">
-                      <input
-                        type="file"
-                        multiple
-                        accept="image/*"
-                        onChange={handleImageUpload}
-                        className="hidden"
-                        id="image-input"
-                      />
-                      <label htmlFor="image-input" className="cursor-pointer">
-                        <div className="flex flex-col items-center">
-                          <Plus className="h-8 w-8 text-gray-400" />
-                          <p className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Click to upload or drag and drop
-                          </p>
-                          <p className="text-xs text-gray-500">PNG, JPG, GIF up to 10MB</p>
-                        </div>
-                      </label>
-                    </div>
-                  </div>
-
-                  {formData.images.length > 0 && (
-                    <div>
-                      <p className="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-                        Uploaded Images ({formData.images.length})
-                      </p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {formData.images.map((image, index) => (
-                          <div key={index} className="relative aspect-square">
-                            <img
-                              src={image.path || image.data || ''}
-                              alt={`Product ${index + 1}`}
-                              className="h-full w-full rounded-lg object-cover"
-                            />
-                            <button
-                              onClick={() => handleRemoveImage(index)}
-                              className="absolute right-1 top-1 rounded-full bg-red-600 p-1 text-white hover:bg-red-700"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
                     </div>
                   )}
                 </div>
@@ -652,10 +725,10 @@ export function AddProductModal({
               {isLastStep && (
                 <button
                   onClick={handleSubmit}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || hasUploadingImages || hasFailedImages}
                   className="flex-1 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 dark:bg-green-600 dark:hover:bg-green-700"
                 >
-                  {isSubmitting ? 'Saving...' : 'Save Product'}
+                  {isSubmitting ? 'Saving...' : hasUploadingImages ? 'Uploading images...' : 'Save Product'}
                 </button>
               )}
             </div>

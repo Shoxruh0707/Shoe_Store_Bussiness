@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { Product } from '@/lib/api';
 import { useProducts } from '@/hooks/useProducts';
 import { useSearch } from '@/hooks/useSearch';
-import { DashboardCards } from '@/components/inventory/DashboardCards';
 import { ProductTable } from '@/components/inventory/ProductTable';
 import { ProductDrawer } from '@/components/inventory/ProductDrawer';
 import { AddProductModal } from '@/components/inventory/AddProductModal';
@@ -19,9 +18,6 @@ export default function InventoryPage() {
     createProduct,
     updateProduct,
     deleteProduct,
-    getTotalStock,
-    getLowStockCount,
-    getOutOfStockCount,
   } = useProducts();
 
   const { searchQuery, setSearchQuery, filteredProducts, clearSearch } = useSearch(products);
@@ -119,16 +115,6 @@ export default function InventoryPage() {
           </div>
         )}
 
-        {/* Dashboard Cards */}
-        <div className="mb-8">
-          <DashboardCards
-            totalProducts={products.length}
-            totalStock={getTotalStock()}
-            lowStockCount={getLowStockCount()}
-            outOfStockCount={getOutOfStockCount()}
-          />
-        </div>
-
         {/* Product Table */}
         <div className="rounded-lg bg-white shadow-sm dark:bg-gray-900">
           <ProductTable
@@ -136,8 +122,6 @@ export default function InventoryPage() {
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             onView={handleViewProduct}
-            onEdit={handleEditProduct}
-            onDelete={handleDeleteProduct}
             isLoading={loading}
           />
         </div>

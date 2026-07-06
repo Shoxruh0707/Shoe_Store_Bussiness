@@ -45,6 +45,7 @@ const SEASON_DB_VALUES = {
 };
 const SIZES = ["33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44"];
 const UPLOAD_DIR = path.join(__dirname, "public", "uploads");
+const TEMP_UPLOAD_DIR = path.join(UPLOAD_DIR, "temp");
 const IMAGE_MIME_EXTENSIONS = {
   "image/jpeg": ".jpg",
   "image/png": ".png",
@@ -53,6 +54,7 @@ const IMAGE_MIME_EXTENSIONS = {
 };
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
 
 const PAGE_PATHS = new Set(["/", "/inventory"]);
 
@@ -248,37 +250,102 @@ function normalizeImages(images) {
     .map((image) => ({
       name: cleanText(image.name),
       type: cleanText(image.type),
-      data: cleanText(image.data)
+      data: cleanText(image.data),
+      tempId: cleanText(image.tempId),
+      path: cleanText(image.path)
     }))
-    .filter((image) => image.data);
+    .filter((image) => image.data || image.tempId);
 }
 
-function normalizeOptionalImage(image) {
-  if (!image || typeof image !== "object") return null;
-  const normalized = {
-    name: cleanText(image.name),
-    type: cleanText(image.type),
-    data: cleanText(image.data)
-  };
-  return normalized.data ? normalized : null;
-}
-
-async function saveImageFile(image) {
-  if (!IMAGE_MIME_EXTENSIONS[image.type]) {
-    throw new Error("Faqat JPG, PNG, WEBP va GIF rasmlarni yuklash mumkin.");
+function imageExtensionForType(type) {
+  if (!IMAGE_MIME_EXTENSIONS[type]) {
+    throw Object.assign(new Error("Faqat JPG, PNG, WEBP va GIF rasmlarni yuklash mumkin."), { statusCode: 400 });
   }
+  return IMAGE_MIME_EXTENSIONS[type];
+}
 
+function imageBufferFromData(image) {
+  const extension = imageExtensionForType(image.type);
   const prefix = `data:${image.type};base64,`;
   const base64 = image.data.startsWith(prefix) ? image.data.slice(prefix.length) : image.data;
   const buffer = Buffer.from(base64, "base64");
 
   if (!buffer.length || buffer.length > 5 * 1024 * 1024) {
-    throw new Error("Har bir rasm 5 MB yoki undan kichik bo'lishi kerak.");
+    throw Object.assign(new Error("Har bir rasm 5 MB yoki undan kichik bo'lishi kerak."), { statusCode: 413 });
   }
 
-  const fileName = `${Date.now()}-${crypto.randomUUID()}${IMAGE_MIME_EXTENSIONS[image.type]}`;
+  return { buffer, extension };
+}
+
+async function saveImageFile(image) {
+  const { buffer, extension } = imageBufferFromData(image);
+
+  const fileName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
   const filePath = path.join(UPLOAD_DIR, fileName);
   await fs.promises.writeFile(filePath, buffer);
+  return `/uploads/${fileName}`;
+}
+
+function tempUploadFilePath(tempId) {
+  const safeTempId = cleanText(tempId);
+  if (!/^[0-9]+-[0-9a-f-]+\.(jpg|png|webp|gif)$/i.test(safeTempId)) {
+    throw Object.assign(new Error("Vaqtinchalik rasm topilmadi."), { statusCode: 400 });
+  }
+  return path.join(TEMP_UPLOAD_DIR, safeTempId);
+}
+
+async function saveTempImageFile(image) {
+  const { buffer, extension } = imageBufferFromData(image);
+  const tempId = `${Date.now()}-${crypto.randomUUID()}${extension}`;
+  const filePath = path.join(TEMP_UPLOAD_DIR, tempId);
+  await fs.promises.writeFile(filePath, buffer);
+  return {
+    tempId,
+    path: `/uploads/temp/${tempId}`
+  };
+}
+
+async function deleteTempImageFile(tempId) {
+  try {
+    await fs.promises.unlink(tempUploadFilePath(tempId));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
+async function cleanupStaleTempUploads(maxAgeMs = 6 * 60 * 60 * 1000) {
+  const now = Date.now();
+  let entries = [];
+  try {
+    entries = await fs.promises.readdir(TEMP_UPLOAD_DIR, { withFileTypes: true });
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return;
+  }
+
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isFile())
+      .map(async (entry) => {
+        const filePath = path.join(TEMP_UPLOAD_DIR, entry.name);
+        try {
+          const stats = await fs.promises.stat(filePath);
+          if (now - stats.mtimeMs > maxAgeMs) {
+            await fs.promises.unlink(filePath);
+          }
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+      })
+  );
+}
+
+async function promoteTempImageFile(tempId) {
+  const sourcePath = tempUploadFilePath(tempId);
+  const extension = path.extname(sourcePath).toLowerCase();
+  const fileName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
+  const destinationPath = path.join(UPLOAD_DIR, fileName);
+  await fs.promises.rename(sourcePath, destinationPath);
   return `/uploads/${fileName}`;
 }
 
@@ -320,7 +387,7 @@ function validateProductPayload(payload) {
 
 async function saveProductImages(connection, variantId, images) {
   for (const image of images) {
-    const imagePath = await saveImageFile(image);
+    const imagePath = image.tempId ? await promoteTempImageFile(image.tempId) : await saveImageFile(image);
 
     await connection.execute("INSERT INTO product_images (product_variant_id, image_path) VALUES (?, ?)", [
       variantId,
@@ -831,21 +898,45 @@ app.get("/api/meta", requireAuth, requireStoreOwner, async (_request, response, 
   }
 });
 
+app.post("/api/uploads/temp", requireAuth, requireStoreOwner, async (request, response, next) => {
+  try {
+    const image = normalizeImages([request.body?.image])[0];
+    if (!image?.data) {
+      apiMessage(response, "Rasm yuklash uchun fayl tanlang.", 400);
+      return;
+    }
+
+    apiData(response, await saveTempImageFile(image), 201);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/uploads/temp/:tempId", requireAuth, requireStoreOwner, async (request, response, next) => {
+  try {
+    await deleteTempImageFile(request.params.tempId);
+    apiData(response, { deleted: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/products", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
     const storeId = currentStoreId(request);
     const [rows] = await pool.execute(
       `SELECT
-         p.id
+         p.id,
+         pv.id AS variantId
        FROM products p
        INNER JOIN product_variant pv ON pv.product_id = p.id
        LEFT JOIN inventory i ON i.product_variant_id = pv.id AND i.store_id = ?
-       GROUP BY p.id
-       ORDER BY p.updated_at DESC, p.created_at DESC`,
+       GROUP BY p.id, pv.id
+       ORDER BY p.updated_at DESC, p.created_at DESC, pv.updated_at DESC, pv.created_at DESC`,
       [storeId]
     );
 
-    const products = (await Promise.all(rows.map((row) => fetchProduct(row.id, storeId)))).filter(Boolean);
+    const products = (await Promise.all(rows.map((row) => fetchProduct(row.id, storeId, row.variantId)))).filter(Boolean);
     apiData(response, products);
   } catch (error) {
     next(error);
@@ -999,9 +1090,17 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
   try {
     await connection.beginTransaction();
 
+    const requestedVariantId = Number(request.body?.variantId || 0);
+    const existingParams = requestedVariantId ? [productId, requestedVariantId] : [productId];
     const [[existing]] = await connection.execute(
-      "SELECT p.id, pv.id AS variantId FROM products p LEFT JOIN product_variant pv ON pv.product_id = p.id WHERE p.id = ? LIMIT 1",
-      [productId]
+      `SELECT p.id, pv.id AS variantId
+       FROM products p
+       LEFT JOIN product_variant pv ON pv.product_id = p.id
+       WHERE p.id = ?
+         ${requestedVariantId ? "AND pv.id = ?" : ""}
+       ORDER BY pv.updated_at DESC, pv.created_at DESC
+       LIMIT 1`,
+      existingParams
     );
 
     if (!existing) {
@@ -1041,7 +1140,7 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
     await saveProductImages(connection, variantId, data.images);
     await connection.commit();
 
-    apiData(response, await fetchProduct(productId, storeId));
+    apiData(response, await fetchProduct(productId, storeId, variantId));
   } catch (error) {
     await connection.rollback();
     next(error);
@@ -1087,7 +1186,8 @@ app.delete("/api/products/:id", requireAuth, requireStoreOwner, async (request, 
 
 app.use((error, _request, response, _next) => {
   console.error(error);
-  response.status(500).json({
+  const statusCode = error.statusCode || (error.type === "entity.too.large" ? 413 : 500);
+  response.status(statusCode).json({
     success: false,
     error: readableDatabaseError(error),
     message: readableDatabaseError(error),
@@ -1096,6 +1196,14 @@ app.use((error, _request, response, _next) => {
 });
 
 function readableDatabaseError(error) {
+  if (error.statusCode && error.message) {
+    return error.message;
+  }
+
+  if (error.type === "entity.too.large") {
+    return "Yuklangan rasmlar juda katta. Rasmlarni bittalab yuklang yoki hajmini kamaytiring.";
+  }
+
   if (error.code === "ER_DUP_ENTRY") {
     return "Bu qiymat allaqachon mavjud. Artno takrorlanishi mumkin, lekin bazada eski unique index qolgan bo'lishi mumkin.";
   }
@@ -1115,6 +1223,12 @@ app.listen(port, host, async () => {
   try {
     await testConnection();
     await removeArtNoUniqueIndexes();
+    await cleanupStaleTempUploads();
+    setInterval(() => {
+      cleanupStaleTempUploads().catch((error) => {
+        console.error(`Temporary upload cleanup failed: ${error.message}`);
+      });
+    }, 60 * 60 * 1000).unref();
     console.log(`Inventory app running at http://localhost:${port}`);
     console.log(`Phone access is available on this computer's network IP at port ${port}.`);
   } catch (error) {

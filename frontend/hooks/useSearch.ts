@@ -1,6 +1,33 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Product } from '@/lib/api';
 
+function normalizeSearchValue(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function searchableProductText(product: Product): string {
+  const existingSizes = (product.inventory || [])
+    .filter((item) => item.quantity > 0)
+    .flatMap((item) => [
+      String(item.size),
+      `${item.size}x${item.quantity}`,
+      `${item.size} ${item.quantity}`,
+    ]);
+
+  return [
+    product.artNo,
+    product.name,
+    product.colour,
+    product.material,
+    product.type,
+    ...(product.seasons || []),
+    ...existingSizes,
+  ]
+    .map(normalizeSearchValue)
+    .filter(Boolean)
+    .join(' ');
+}
+
 export interface UseSearchReturn {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
@@ -17,17 +44,11 @@ export function useSearch(products: Product[]): UseSearchReturn {
       return products;
     }
 
-    const lowerQuery = searchQuery.toLowerCase();
+    const tokens = normalizeSearchValue(searchQuery).split(/\s+/).filter(Boolean);
 
     return products.filter((product) => {
-      // Search in: Art No, Product Name, Colour, Type, Material
-      return (
-        product.artNo.toLowerCase().includes(lowerQuery) ||
-        product.name.toLowerCase().includes(lowerQuery) ||
-        product.colour.toLowerCase().includes(lowerQuery) ||
-        product.type.toLowerCase().includes(lowerQuery) ||
-        product.material.toLowerCase().includes(lowerQuery)
-      );
+      const productText = searchableProductText(product);
+      return tokens.every((token) => productText.includes(token));
     });
   }, [products, searchQuery]);
 

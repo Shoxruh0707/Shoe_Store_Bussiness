@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
 const backendApiUrl = process.env.BACKEND_API_URL || 'http://127.0.0.1:3000/api';
+const backendBaseUrl = backendApiUrl.replace(/\/api\/?$/, '');
 const allowedDevOrigins = [
   '127.0.0.1',
   'localhost',
@@ -26,6 +27,10 @@ const nextConfig = {
       {
         source: '/api/:path*',
         destination: `${backendApiUrl}/:path*`,
+      },
+      {
+        source: '/uploads/:path*',
+        destination: `${backendBaseUrl}/uploads/:path*`,
       },
     ];
   },
