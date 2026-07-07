@@ -181,6 +181,16 @@ function parsePositiveNumber(value) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
+// New sold-product feature code starts.
+function parseNonNegativeDecimal(value) {
+  const text = cleanText(value).replace(/,/g, ".");
+  if (!/^\d+(\.\d{1,2})?$/.test(text)) return null;
+
+  const number = Number(text);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+// New sold-product feature code ends.
+
 function validatePhone(value) {
   const phone = cleanText(value);
   return /^\+?[0-9\s-]{7,20}$/.test(phone) ? phone : "";
@@ -412,6 +422,146 @@ async function removeArtNoUniqueIndexes() {
     await pool.query(`ALTER TABLE products DROP INDEX \`${index.indexName.replace(/`/g, "``")}\``);
   }
 }
+
+// New sold-product feature code starts.
+async function ensureSoldProductsTable() {
+  await pool.execute(
+    `CREATE TABLE IF NOT EXISTS sold_products (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      store_id INT NOT NULL,
+      user_id INT NOT NULL,
+      product_variant_id INT NOT NULL,
+      size ENUM('33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44') NOT NULL,
+      quantity INT NOT NULL DEFAULT 1,
+      sold_price DECIMAL(10,2) NOT NULL,
+      landing_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+      sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+      CONSTRAINT fk_sold_products_store
+        FOREIGN KEY (store_id) REFERENCES store(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+      CONSTRAINT fk_sold_products_user
+        FOREIGN KEY (user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+      CONSTRAINT fk_sold_products_variant
+        FOREIGN KEY (product_variant_id) REFERENCES product_variant(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+      CONSTRAINT chk_sold_products_quantity
+        CHECK (quantity > 0),
+
+      CONSTRAINT chk_sold_products_price
+        CHECK (sold_price >= 0),
+
+      CONSTRAINT chk_sold_products_landing_price
+        CHECK (landing_price >= 0)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+  );
+
+  const [landingPriceColumns] = await pool.execute(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'sold_products'
+       AND COLUMN_NAME = 'landing_price'
+     LIMIT 1`
+  );
+
+  if (!landingPriceColumns.length) {
+    await pool.query(
+      "ALTER TABLE sold_products ADD COLUMN landing_price DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER sold_price"
+    );
+  }
+
+  const [landingPriceChecks] = await pool.execute(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS
+     WHERE CONSTRAINT_SCHEMA = DATABASE()
+       AND CONSTRAINT_NAME = 'chk_sold_products_landing_price'
+     LIMIT 1`
+  );
+
+  if (!landingPriceChecks.length) {
+    await pool.query(
+      "ALTER TABLE sold_products ADD CONSTRAINT chk_sold_products_landing_price CHECK (landing_price >= 0)"
+    );
+  }
+
+  const indexes = [
+    ["idx_sold_products_store_id", "store_id"],
+    ["idx_sold_products_user_id", "user_id"],
+    ["idx_sold_products_product_variant_id", "product_variant_id"],
+    ["idx_sold_products_sold_at", "sold_at"]
+  ];
+
+  for (const [indexName, columnName] of indexes) {
+    const [existing] = await pool.execute(
+      `SELECT 1
+       FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'sold_products'
+         AND INDEX_NAME = ?
+       LIMIT 1`,
+      [indexName]
+    );
+
+    if (!existing.length) {
+      await pool.query(`CREATE INDEX \`${indexName}\` ON sold_products(\`${columnName}\`)`);
+    }
+  }
+}
+
+function validateSoldProductPayload(payload) {
+  const artNo = cleanText(payload?.art_no);
+  const colourName = cleanText(payload?.colour_name);
+  const materialType = cleanText(payload?.material_type);
+  const size = cleanText(payload?.size);
+  const soldPrice = parseNonNegativeDecimal(payload?.sold_price);
+  const quantity = Number(payload?.quantity || 1);
+
+  if (!artNo) return { error: "Art number is required." };
+  if (!colourName) return { error: "Color is required." };
+  if (!materialType) return { error: "Material type is required." };
+  if (!SIZES.includes(size)) return { error: "Valid size is required." };
+  if (soldPrice === null) return { error: "Sold price must be a valid number greater than or equal to 0." };
+  if (!Number.isInteger(quantity) || quantity <= 0) return { error: "Quantity sold must be a positive whole number." };
+
+  return {
+    sale: {
+      artNo,
+      colourName,
+      materialType,
+      size,
+      soldPrice,
+      quantity
+    }
+  };
+}
+
+function normalizeSoldProductsDate(value) {
+  const date = cleanText(value);
+  if (!date) return new Date().toISOString().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "";
+}
+
+async function userIdForSale(connection, request) {
+  if (request.user?.id) return request.user.id;
+
+  const [owners] = await connection.execute("SELECT id FROM users WHERE phone_number = ? LIMIT 1", [defaultOwnerPhone]);
+  if (owners.length) return owners[0].id;
+
+  await ensureDefaultStore(connection);
+  const [createdOwners] = await connection.execute("SELECT id FROM users WHERE phone_number = ? LIMIT 1", [
+    defaultOwnerPhone
+  ]);
+  return createdOwners[0]?.id || request.user?.id;
+}
+// New sold-product feature code ends.
 
 async function getOrCreateLookup(connection, table, idColumn, valueColumn, value) {
   const [existing] = await connection.execute(
@@ -921,6 +1071,152 @@ app.delete("/api/uploads/temp/:tempId", requireAuth, requireStoreOwner, async (r
   }
 });
 
+// New sold-product feature code starts.
+app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, response, next) => {
+  const validation = validateSoldProductPayload(request.body);
+  if (validation.error) {
+    apiMessage(response, validation.error, 400);
+    return;
+  }
+
+  const sale = validation.sale;
+  const storeId = currentStoreId(request);
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [matches] = await connection.execute(
+      `SELECT
+         p.id AS productId,
+         p.landing_price AS landingPrice,
+         pv.id AS productVariantId,
+         i.id AS inventoryId,
+         i.quantity
+       FROM products p
+       INNER JOIN product_variant pv ON pv.product_id = p.id
+       INNER JOIN colours c ON c.id = pv.colour_id
+       INNER JOIN materials m ON m.id = pv.material_id
+       INNER JOIN inventory i ON i.product_variant_id = pv.id
+       WHERE p.art_no = ?
+         AND c.colour_name = ?
+         AND m.material_type = ?
+         AND i.size = ?
+         AND i.store_id = ?
+       ORDER BY p.updated_at DESC, p.created_at DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [sale.artNo, sale.colourName, sale.materialType, sale.size, storeId]
+    );
+
+    const match = matches[0];
+    if (!match) {
+      await connection.rollback();
+      apiMessage(response, "Product not found in inventory", 404);
+      return;
+    }
+
+    if (Number(match.quantity || 0) < sale.quantity) {
+      await connection.rollback();
+      apiMessage(response, "Not enough quantity in inventory", 400);
+      return;
+    }
+
+    const saleUserId = await userIdForSale(connection, request);
+    if (!saleUserId) {
+      await connection.rollback();
+      apiMessage(response, "Valid seller user was not found for sale history", 403);
+      return;
+    }
+
+    await connection.execute(
+      `INSERT INTO sold_products
+         (store_id, user_id, product_variant_id, size, quantity, sold_price, landing_price)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [storeId, saleUserId, match.productVariantId, sale.size, sale.quantity, sale.soldPrice, match.landingPrice]
+    );
+
+    const remainingQuantity = Number(match.quantity) - sale.quantity;
+    if (remainingQuantity > 0) {
+      await connection.execute("UPDATE inventory SET quantity = ?, updated_at = NOW() WHERE id = ?", [
+        remainingQuantity,
+        match.inventoryId
+      ]);
+    } else {
+      await connection.execute("DELETE FROM inventory WHERE id = ?", [match.inventoryId]);
+    }
+
+    await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [match.productVariantId]);
+    await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [match.productId]);
+    await connection.commit();
+
+    response.json({
+      success: true,
+      message: "Product marked as sold successfully",
+      remaining_quantity: remainingQuantity
+    });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
+  }
+});
+
+app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, response, next) => {
+  try {
+    const saleDate = normalizeSoldProductsDate(request.query.date);
+    if (!saleDate) {
+      apiMessage(response, "Valid date is required.", 400);
+      return;
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT
+         sp.id,
+         sp.size,
+         sp.quantity,
+         sp.sold_price AS soldPrice,
+         sp.landing_price AS landingPrice,
+         sp.sold_at AS soldAt,
+         p.art_no AS artNo,
+         p.name,
+         c.colour_name AS colour,
+         m.material_type AS material,
+         (
+           SELECT pi.image_path
+           FROM product_images pi
+           WHERE pi.product_variant_id = pv.id
+           ORDER BY pi.id
+           LIMIT 1
+         ) AS imagePath
+       FROM sold_products sp
+       INNER JOIN product_variant pv ON pv.id = sp.product_variant_id
+       INNER JOIN products p ON p.id = pv.product_id
+       INNER JOIN colours c ON c.id = pv.colour_id
+       INNER JOIN materials m ON m.id = pv.material_id
+       WHERE sp.store_id = ?
+         AND sp.sold_at >= ?
+         AND sp.sold_at < DATE_ADD(?, INTERVAL 1 DAY)
+       ORDER BY sp.sold_at DESC, sp.id DESC`,
+      [currentStoreId(request), saleDate, saleDate]
+    );
+
+    apiData(response, {
+      date: saleDate,
+      items: rows.map((row) => ({
+        ...row,
+        quantity: Number(row.quantity || 0),
+        soldPrice: Number(row.soldPrice || 0),
+        landingPrice: Number(row.landingPrice || 0)
+      }))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+// New sold-product feature code ends.
+
 app.get("/api/products", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
     const storeId = currentStoreId(request);
@@ -1223,6 +1519,7 @@ app.listen(port, host, async () => {
   try {
     await testConnection();
     await removeArtNoUniqueIndexes();
+    await ensureSoldProductsTable();
     await cleanupStaleTempUploads();
     setInterval(() => {
       cleanupStaleTempUploads().catch((error) => {

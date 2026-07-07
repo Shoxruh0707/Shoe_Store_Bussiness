@@ -67,6 +67,42 @@ export interface ProductLookup {
   variants: ProductVariantLookup[];
 }
 
+// New sold-product feature code starts.
+export interface SoldProductPayload {
+  art_no: string;
+  colour_name: string;
+  material_type: string;
+  size: string;
+  sold_price: number;
+  quantity: number;
+}
+
+export interface SoldProductResponse {
+  success: boolean;
+  message: string;
+  remaining_quantity: number;
+}
+
+export interface SoldProductAnalyticsItem {
+  id: number;
+  artNo: string;
+  name: string;
+  colour: string;
+  material: string;
+  size: string;
+  quantity: number;
+  soldPrice: number;
+  landingPrice: number;
+  soldAt: string;
+  imagePath?: string;
+}
+
+export interface SoldProductsAnalyticsResponse {
+  date: string;
+  items: SoldProductAnalyticsItem[];
+}
+// New sold-product feature code ends.
+
 export interface APIResponse<T> {
   success: boolean;
   message?: string;
@@ -113,6 +149,21 @@ class APIClient {
       })),
     };
   }
+
+  // New sold-product analytics code starts.
+  private normalizeSoldProduct(item: SoldProductAnalyticsItem): SoldProductAnalyticsItem {
+    return {
+      ...item,
+      quantity: Number(item.quantity || 0),
+      soldPrice: Number(item.soldPrice || 0),
+      landingPrice: Number(item.landingPrice || 0),
+      imagePath:
+        item.imagePath && item.imagePath.startsWith('/') && this.assetBaseUrl
+          ? `${this.assetBaseUrl}${item.imagePath}`
+          : item.imagePath,
+    };
+  }
+  // New sold-product analytics code ends.
 
   private async request<T>(
     method: string,
@@ -226,6 +277,25 @@ class APIClient {
   async deleteProduct(id: number): Promise<any> {
     return this.request('DELETE', `/products/${id}`);
   }
+
+  // New sold-product feature code starts.
+  async markProductSold(payload: SoldProductPayload): Promise<SoldProductResponse> {
+    return this.request('POST', '/inventory/sold', payload);
+  }
+
+  async getSoldProducts(date?: string): Promise<SoldProductsAnalyticsResponse> {
+    const params = date ? `?${new URLSearchParams({ date })}` : '';
+    const response = await this.request<{ data: SoldProductsAnalyticsResponse }>(
+      'GET',
+      `/sold-products${params}`
+    );
+
+    return {
+      date: response.data?.date || date || '',
+      items: (response.data?.items || []).map((item) => this.normalizeSoldProduct(item)),
+    };
+  }
+  // New sold-product feature code ends.
 
   async matchProduct(
     artNo: string,

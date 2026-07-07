@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { Product } from '@/lib/api';
 import { useProducts } from '@/hooks/useProducts';
@@ -7,7 +8,9 @@ import { useSearch } from '@/hooks/useSearch';
 import { ProductTable } from '@/components/inventory/ProductTable';
 import { ProductDrawer } from '@/components/inventory/ProductDrawer';
 import { AddProductModal } from '@/components/inventory/AddProductModal';
-import { Plus } from 'lucide-react';
+import { SoldProductModal } from '@/components/inventory/SoldProductModal';
+import { SoldProductPayload } from '@/lib/api';
+import { BarChart3, Plus, ShoppingBag } from 'lucide-react';
 
 export default function InventoryPage() {
   const {
@@ -18,6 +21,7 @@ export default function InventoryPage() {
     createProduct,
     updateProduct,
     deleteProduct,
+    markProductSold,
   } = useProducts();
 
   const { searchQuery, setSearchQuery, filteredProducts, clearSearch } = useSearch(products);
@@ -25,8 +29,10 @@ export default function InventoryPage() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isSoldModalOpen, setIsSoldModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [saleMessage, setSaleMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const handleViewProduct = (product: Product) => {
     setSelectedProduct(product);
@@ -78,6 +84,30 @@ export default function InventoryPage() {
     }
   };
 
+  // New sold-product feature code starts.
+  const handleSoldProduct = async (payload: SoldProductPayload) => {
+    setIsSubmitting(true);
+    setSaleMessage(null);
+
+    try {
+      const result = await markProductSold(payload);
+      if (!result) {
+        throw new Error('Product could not be marked as sold. Check the fields and try again.');
+      }
+
+      const message = `${result.message}. Remaining quantity: ${result.remaining_quantity}`;
+      setSaleMessage({ type: 'success', text: message });
+      return message;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to mark product as sold.';
+      setSaleMessage({ type: 'error', text: message });
+      throw error;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  // New sold-product feature code ends.
+
   return (
     <main className="min-h-screen bg-gray-50 dark:bg-gray-950">
       {/* Header */}
@@ -92,16 +122,39 @@ export default function InventoryPage() {
                 Manage your shoe products and stock levels
               </p>
             </div>
-            <button
-              onClick={() => {
-                setEditingProduct(null);
-                setIsAddModalOpen(true);
-              }}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
-            >
-              <Plus className="h-4 w-4" />
-              Add Product
-            </button>
+            <div className="flex flex-wrap justify-end gap-2">
+              {/* New sold-product analytics page code starts. */}
+              <Link
+                href="/analytics"
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <BarChart3 className="h-4 w-4" />
+                Analytics
+              </Link>
+              {/* New sold-product analytics page code ends. */}
+              {/* New sold-product feature code starts. */}
+              <button
+                onClick={() => {
+                  setSaleMessage(null);
+                  setIsSoldModalOpen(true);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700"
+              >
+                <ShoppingBag className="h-4 w-4" />
+                Sold Product
+              </button>
+              {/* New sold-product feature code ends. */}
+              <button
+                onClick={() => {
+                  setEditingProduct(null);
+                  setIsAddModalOpen(true);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
+              >
+                <Plus className="h-4 w-4" />
+                Add Product
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -114,6 +167,21 @@ export default function InventoryPage() {
             <p className="mt-1">{error}</p>
           </div>
         )}
+
+        {/* New sold-product feature code starts. */}
+        {saleMessage && (
+          <div
+            className={`mb-6 rounded-lg p-4 text-sm ${
+              saleMessage.type === 'success'
+                ? 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-200'
+                : 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200'
+            }`}
+          >
+            <p className="font-medium">{saleMessage.type === 'success' ? 'Sale saved' : 'Sale failed'}</p>
+            <p className="mt-1">{saleMessage.text}</p>
+          </div>
+        )}
+        {/* New sold-product feature code ends. */}
 
         {/* Product Table */}
         <div className="rounded-lg bg-white shadow-sm dark:bg-gray-900">
@@ -151,6 +219,16 @@ export default function InventoryPage() {
         metadata={metadata}
         isSubmitting={isSubmitting}
       />
+
+      {/* New sold-product feature code starts. */}
+      <SoldProductModal
+        isOpen={isSoldModalOpen}
+        onClose={() => setIsSoldModalOpen(false)}
+        onSubmit={handleSoldProduct}
+        metadata={metadata}
+        isSubmitting={isSubmitting}
+      />
+      {/* New sold-product feature code ends. */}
     </main>
   );
 }

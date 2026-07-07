@@ -1,0 +1,100 @@
+HOW TO RUN THE ADMIN SHOE STORE PROJECT
+
+Current running services
+1. Backend API:
+   http://localhost:3000
+
+2. Frontend:
+   http://localhost:3001
+
+3. ngrok public frontend URL:
+   https://ferruginous-nonamphibiously-kinley.ngrok-free.dev
+
+4. Telegram Mini App URL:
+   https://ferruginous-nonamphibiously-kinley.ngrok-free.dev/inventory
+
+
+Fast start or restart everything
+From PowerShell in this folder:
+
+cd E:\AdminShoeStore
+npm.cmd run stack:restart
+
+This starts:
+- backend: node server.js
+- frontend: npm --prefix frontend run dev
+- Telegram bot: npm run bot
+- ngrok tunnel to frontend port 3001
+
+Logs are saved here:
+- logs\backend.log
+- logs\backend.err.log
+- logs\frontend.log
+- logs\frontend.err.log
+- logs\bot.log
+- logs\bot.err.log
+- logs\ngrok.log
+- logs\ngrok.err.log
+
+
+Run services manually
+Open separate PowerShell terminals.
+
+Terminal 1, backend:
+cd E:\AdminShoeStore
+npm.cmd start
+
+Terminal 2, frontend:
+cd E:\AdminShoeStore
+npm.cmd run frontend:dev
+
+Terminal 3, Telegram bot:
+cd E:\AdminShoeStore
+npm.cmd run bot
+
+Terminal 4, ngrok:
+cd E:\AdminShoeStore
+.\tools\ngrok\ngrok.exe http 3001 --log=stdout
+
+
+Important .env values
+Check E:\AdminShoeStore\.env before running:
+
+PORT=3000
+FRONTEND_URL=http://localhost:3001
+TELEGRAM_WEBAPP_URL=https://your-ngrok-url/inventory
+CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
+
+The ngrok URL changes when ngrok restarts unless you use a reserved ngrok domain.
+After ngrok starts, copy the new HTTPS URL and set:
+
+TELEGRAM_WEBAPP_URL=https://new-ngrok-url/inventory
+
+Then restart the bot or restart the whole stack:
+
+npm.cmd run stack:restart
+
+
+Check if it is running
+Backend health:
+http://localhost:3000/api/health
+
+Frontend:
+http://localhost:3001/inventory
+
+ngrok inspector:
+http://127.0.0.1:4040
+
+ngrok tunnel API:
+http://127.0.0.1:4040/api/tunnels
+
+
+Common fixes
+If PowerShell blocks npm, use npm.cmd instead of npm.
+
+If port 3000 or 3001 is busy, restart the stack:
+npm.cmd run stack:restart
+
+If the bot starts but the Mini App opens the wrong page, update TELEGRAM_WEBAPP_URL in .env to the current ngrok HTTPS URL ending with /inventory, then restart.
+
+If the app says the database is unavailable, make sure MySQL is running and the DB_* values in .env match your local MySQL setup.

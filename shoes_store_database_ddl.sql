@@ -6,6 +6,7 @@
 -- - payment_details, delivery, orders, and order_items are removed for now.
 -- - products table includes landing_price column.
 -- - product seasons are stored in product_seasons table so one product can belong to multiple seasons.
+-- - sold_products stores manually marked sales with sold prices.
 
 CREATE DATABASE IF NOT EXISTS shoes_store_db
   CHARACTER SET utf8mb4
@@ -16,6 +17,7 @@ USE shoes_store_db;
 SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS inventory;
+DROP TABLE IF EXISTS sold_products;
 DROP TABLE IF EXISTS product_images;
 DROP TABLE IF EXISTS product_seasons;
 DROP TABLE IF EXISTS product_variant;
@@ -253,3 +255,49 @@ CREATE TABLE inventory (
 CREATE INDEX idx_inventory_product_variant_id ON inventory(product_variant_id);
 CREATE INDEX idx_inventory_store_id ON inventory(store_id);
 CREATE INDEX idx_inventory_size ON inventory(size);
+
+-- New sold-product feature code starts.
+-- =========================
+-- Sold Products
+-- =========================
+CREATE TABLE sold_products (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    store_id INT NOT NULL,
+    user_id INT NOT NULL,
+    product_variant_id INT NOT NULL,
+    size ENUM('33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44') NOT NULL,
+    quantity INT NOT NULL DEFAULT 1,
+    sold_price DECIMAL(10,2) NOT NULL,
+    landing_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_sold_products_store
+        FOREIGN KEY (store_id) REFERENCES store(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_sold_products_user
+        FOREIGN KEY (user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_sold_products_variant
+        FOREIGN KEY (product_variant_id) REFERENCES product_variant(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    CONSTRAINT chk_sold_products_quantity
+        CHECK (quantity > 0),
+
+    CONSTRAINT chk_sold_products_price
+        CHECK (sold_price >= 0),
+
+    CONSTRAINT chk_sold_products_landing_price
+        CHECK (landing_price >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX idx_sold_products_store_id ON sold_products(store_id);
+CREATE INDEX idx_sold_products_user_id ON sold_products(user_id);
+CREATE INDEX idx_sold_products_product_variant_id ON sold_products(product_variant_id);
+CREATE INDEX idx_sold_products_sold_at ON sold_products(sold_at);
+-- New sold-product feature code ends.

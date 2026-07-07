@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { api, Product, Metadata } from '@/lib/api';
+import { api, Product, Metadata, SoldProductPayload, SoldProductResponse } from '@/lib/api';
 
 function productRowKey(product: Product): string {
   return product.variantId ? `variant-${product.variantId}` : `product-${product.id}`;
@@ -15,6 +15,7 @@ export interface UseProductsReturn {
   createProduct: (product: Product) => Promise<Product | null>;
   updateProduct: (id: number, product: Product) => Promise<Product | null>;
   deleteProduct: (id: number) => Promise<boolean>;
+  markProductSold: (payload: SoldProductPayload) => Promise<SoldProductResponse>;
   getTotalStock: () => number;
   getLowStockCount: () => number;
   getOutOfStockCount: () => number;
@@ -106,6 +107,24 @@ export function useProducts(): UseProductsReturn {
     }
   }, []);
 
+  // New sold-product feature code starts.
+  const markProductSold = useCallback(
+    async (payload: SoldProductPayload): Promise<SoldProductResponse> => {
+      try {
+        const result = await api.markProductSold(payload);
+        await fetchProducts();
+        return result;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to mark product as sold';
+        setError(message);
+        console.error('[v0] Failed to mark product as sold:', message);
+        throw err;
+      }
+    },
+    [fetchProducts]
+  );
+  // New sold-product feature code ends.
+
   const getTotalStock = useCallback(() => {
     return products.reduce((total, product) => {
       const productTotal = product.inventory.reduce((sum, item) => sum + item.quantity, 0);
@@ -143,6 +162,7 @@ export function useProducts(): UseProductsReturn {
     createProduct,
     updateProduct,
     deleteProduct,
+    markProductSold,
     getTotalStock,
     getLowStockCount,
     getOutOfStockCount,
