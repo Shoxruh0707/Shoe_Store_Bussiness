@@ -39,9 +39,9 @@ export function useProducts(): UseProductsReturn {
       const data = await api.getProducts();
       setProducts(data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch products';
+      const message = err instanceof Error ? err.message : 'Mahsulotlarni yuklashda xatolik';
       setError(message);
-      console.error('[v0] Failed to fetch products:', message);
+      console.error('[v0] Mahsulotlarni yuklashda xatolik:', message);
     } finally {
       setLoading(false);
     }
@@ -52,7 +52,7 @@ export function useProducts(): UseProductsReturn {
       const data = await api.getMetadata();
       setMetadata(data);
     } catch (err) {
-      console.error('[v0] Failed to fetch metadata:', err);
+      console.error('[v0] Ma\'lumotnomalarni yuklashda xatolik:', err);
     }
   }, []);
 
@@ -68,9 +68,9 @@ export function useProducts(): UseProductsReturn {
       });
       return newProduct;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create product';
+      const message = err instanceof Error ? err.message : 'Mahsulot qo\'shishda xatolik';
       setError(message);
-      console.error('[v0] Failed to create product:', message);
+      console.error('[v0] Mahsulot qo\'shishda xatolik:', message);
       return null;
     }
   }, []);
@@ -85,9 +85,9 @@ export function useProducts(): UseProductsReturn {
         );
         return updated;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to update product';
+        const message = err instanceof Error ? err.message : 'Mahsulotni yangilashda xatolik';
         setError(message);
-        console.error('[v0] Failed to update product:', message);
+        console.error('[v0] Mahsulotni yangilashda xatolik:', message);
         return null;
       }
     },
@@ -100,9 +100,9 @@ export function useProducts(): UseProductsReturn {
       setProducts((prev) => prev.filter((p) => p.id !== id));
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete product';
+      const message = err instanceof Error ? err.message : 'Mahsulotni o\'chirishda xatolik';
       setError(message);
-      console.error('[v0] Failed to delete product:', message);
+      console.error('[v0] Mahsulotni o\'chirishda xatolik:', message);
       return false;
     }
   }, []);
@@ -115,9 +115,9 @@ export function useProducts(): UseProductsReturn {
         await fetchProducts();
         return result;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to mark product as sold';
+        const message = err instanceof Error ? err.message : 'Mahsulotni sotilgan deb belgilashda xatolik';
         setError(message);
-        console.error('[v0] Failed to mark product as sold:', message);
+        console.error('[v0] Mahsulotni sotilgan deb belgilashda xatolik:', message);
         throw err;
       }
     },

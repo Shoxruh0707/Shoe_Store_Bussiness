@@ -22,6 +22,7 @@ DROP TABLE IF EXISTS product_images;
 DROP TABLE IF EXISTS product_seasons;
 DROP TABLE IF EXISTS product_variant;
 DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS inventory_access_requests;
 DROP TABLE IF EXISTS store_users;
 DROP TABLE IF EXISTS store;
 DROP TABLE IF EXISTS users;
@@ -95,6 +96,38 @@ CREATE TABLE store_users (
 CREATE INDEX idx_store_users_user_id ON store_users(user_id);
 CREATE INDEX idx_store_users_store_id ON store_users(store_id);
 CREATE INDEX idx_store_users_role ON store_users(role);
+
+-- =========================
+-- Inventory Access Requests
+-- =========================
+CREATE TABLE inventory_access_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    seller_user_id INT NOT NULL,
+    store_id INT NOT NULL,
+    status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+    requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    responded_at DATETIME NULL,
+    responded_by_user_id INT NULL,
+
+    CONSTRAINT fk_inventory_access_requests_seller
+        FOREIGN KEY (seller_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_inventory_access_requests_store
+        FOREIGN KEY (store_id) REFERENCES store(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_inventory_access_requests_responder
+        FOREIGN KEY (responded_by_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX idx_inventory_access_requests_seller ON inventory_access_requests(seller_user_id);
+CREATE INDEX idx_inventory_access_requests_store ON inventory_access_requests(store_id);
+CREATE INDEX idx_inventory_access_requests_status ON inventory_access_requests(status);
 
 -- =========================
 -- Lookup Tables

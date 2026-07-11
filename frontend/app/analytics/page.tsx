@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, BarChart3, CalendarDays, ImageIcon, RefreshCw } from 'lucide-react';
-import { api, SoldProductAnalyticsItem } from '@/lib/api';
+import { api, AuthMe, SoldProductAnalyticsItem } from '@/lib/api';
 
 function todayForInput() {
   const today = new Date();
@@ -26,14 +26,16 @@ export default function AnalyticsPage() {
   const [items, setItems] = useState<SoldProductAnalyticsItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [auth, setAuth] = useState<AuthMe | null>(null);
+  const canViewSensitiveFields = auth?.user.role === 'admin' || ['owner', 'manager'].includes(auth?.store?.storeRole || '');
 
   const totals = useMemo(
     () =>
       items.reduce(
         (summary, item) => ({
-          quantity: summary.quantity + item.quantity,
-          revenue: summary.revenue + item.soldPrice * item.quantity,
-          landing: summary.landing + item.landingPrice * item.quantity,
+          quantity: summary.quantity + (item.quantity || 0),
+          revenue: summary.revenue + (item.soldPrice || 0) * (item.quantity || 0),
+          landing: summary.landing + (item.landingPrice || 0) * (item.quantity || 0),
         }),
         { quantity: 0, revenue: 0, landing: 0 }
       ),
@@ -47,7 +49,7 @@ export default function AnalyticsPage() {
       const result = await api.getSoldProducts(date);
       setItems(result.items);
     } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : 'Failed to load sold products.');
+      setError(fetchError instanceof Error ? fetchError.message : 'Sotilgan mahsulotlarni yuklashda xatolik.');
     } finally {
       setLoading(false);
     }
@@ -56,6 +58,10 @@ export default function AnalyticsPage() {
   useEffect(() => {
     fetchSoldProducts(selectedDate);
   }, [selectedDate]);
+
+  useEffect(() => {
+    api.getAuthMe().then(setAuth).catch(() => setAuth(null));
+  }, []);
 
   return (
     <main className="min-h-screen bg-gray-50 dark:bg-gray-950">
@@ -66,13 +72,13 @@ export default function AnalyticsPage() {
               <Link
                 href="/inventory"
                 className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                aria-label="Back to inventory"
+                aria-label="Omborga qaytish"
               >
                 <ArrowLeft className="h-5 w-5" />
               </Link>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Analytics</h1>
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Daily sold products</p>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Tahlil</h1>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Kunlik sotilgan mahsulotlar</p>
               </div>
             </div>
 
@@ -93,7 +99,7 @@ export default function AnalyticsPage() {
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-700"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
+                Yangilash
               </button>
             </div>
           </div>
@@ -103,31 +109,33 @@ export default function AnalyticsPage() {
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {error && (
           <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950 dark:text-red-200">
-            <p className="font-medium">Error loading analytics</p>
+            <p className="font-medium">Tahlilni yuklashda xatolik</p>
             <p className="mt-1">{error}</p>
           </div>
         )}
 
-        <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        <div className={`mb-6 grid gap-3 ${canViewSensitiveFields ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
           <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sold quantity</p>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sotilgan son</p>
             <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{totals.quantity}</p>
           </div>
           <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sold total</p>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sotuv jami</p>
             <p className="mt-1 text-2xl font-bold text-green-700 dark:text-green-300">{money(totals.revenue)}</p>
           </div>
-          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Landing total</p>
-            <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{money(totals.landing)}</p>
-          </div>
+          {canViewSensitiveFields && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Kelish jami</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{money(totals.landing)}</p>
+            </div>
+          )}
         </div>
 
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
               <BarChart3 className="h-4 w-4" />
-              Sold products for {selectedDate}
+              {selectedDate} uchun sotilgan mahsulotlar
             </div>
           </div>
 
@@ -140,8 +148,8 @@ export default function AnalyticsPage() {
           {!loading && items.length === 0 && (
             <div className="py-10 text-center">
               <BarChart3 className="mx-auto h-10 w-10 text-gray-400 dark:text-gray-600" />
-              <p className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">No sold products</p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">Change the date filter to review another day.</p>
+              <p className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">Sotilgan mahsulot yo'q</p>
+              <p className="text-xs text-gray-600 dark:text-gray-400">Boshqa kunni ko'rish uchun sanani o'zgartiring.</p>
             </div>
           )}
 
@@ -150,13 +158,18 @@ export default function AnalyticsPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
                   <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Image</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rasm</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Art No</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Colour</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Size</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Qty</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sold Price</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Landing Price</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rang</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Material</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">O'lcham</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sotuv narxi</th>
+                    {canViewSensitiveFields && (
+                      <>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sotuvchi</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Kelish narxi</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -173,10 +186,15 @@ export default function AnalyticsPage() {
                       </td>
                       <td className="px-4 py-3 font-bold text-gray-900 dark:text-gray-100">{item.artNo}</td>
                       <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.colour}</td>
+                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.material}</td>
                       <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.size}</td>
-                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.quantity}</td>
-                      <td className="px-4 py-3 font-semibold text-green-700 dark:text-green-300">{money(item.soldPrice)}</td>
-                      <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{money(item.landingPrice)}</td>
+                      <td className="px-4 py-3 font-semibold text-green-700 dark:text-green-300">{money(item.soldPrice || 0)}</td>
+                      {canViewSensitiveFields && (
+                        <>
+                          <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.sellerName || 'Noma\'lum'}</td>
+                          <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{money(item.landingPrice || 0)}</td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>

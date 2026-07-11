@@ -4,8 +4,8 @@ import Script from 'next/script'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Shoe Store Inventory',
-  description: 'Professional inventory management system for shoe store',
+  title: 'Oyoq Kiyim Ombori',
+  description: 'Oyoq kiyim do\'koni uchun ombor boshqaruv tizimi',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -43,7 +43,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="uz" suppressHydrationWarning>
       <body className="antialiased">
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
         {children}

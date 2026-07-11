@@ -54,7 +54,7 @@ function webAppKeyboard(extraRows = []) {
     inline_keyboard: [
       [
         {
-          text: "📦 Open Inventory",
+          text: "Omborni ochish",
           web_app: { url: webAppUrl }
         }
       ],
@@ -66,8 +66,8 @@ function webAppKeyboard(extraRows = []) {
 function accountTypeKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: "Seller", callback_data: "account:seller" }],
-      [{ text: "Store Owner", callback_data: "account:store_owner" }]
+      [{ text: "Sotuvchi", callback_data: "account:seller" }],
+      [{ text: "Do'kon egasi", callback_data: "account:store_owner" }]
     ]
   };
 }
@@ -84,6 +84,57 @@ async function answerCallbackQuery(callbackQueryId) {
   return telegram("answerCallbackQuery", {
     callback_query_id: callbackQueryId
   });
+}
+
+async function ensureInventoryAccessRequestsTable() {
+  await pool.execute(
+    `CREATE TABLE IF NOT EXISTS inventory_access_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      seller_user_id INT NOT NULL,
+      store_id INT NOT NULL,
+      status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+      requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      responded_at DATETIME NULL,
+      responded_by_user_id INT NULL,
+
+      CONSTRAINT fk_inventory_access_requests_seller
+        FOREIGN KEY (seller_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+      CONSTRAINT fk_inventory_access_requests_store
+        FOREIGN KEY (store_id) REFERENCES store(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+      CONSTRAINT fk_inventory_access_requests_responder
+        FOREIGN KEY (responded_by_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+  );
+
+  const indexes = [
+    ["idx_inventory_access_requests_seller", "seller_user_id"],
+    ["idx_inventory_access_requests_store", "store_id"],
+    ["idx_inventory_access_requests_status", "status"]
+  ];
+
+  for (const [indexName, columnName] of indexes) {
+    const [existing] = await pool.execute(
+      `SELECT 1
+       FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'inventory_access_requests'
+         AND INDEX_NAME = ?
+       LIMIT 1`,
+      [indexName]
+    );
+
+    if (!existing.length) {
+      await pool.query(`CREATE INDEX \`${indexName}\` ON inventory_access_requests(\`${columnName}\`)`);
+    }
+  }
 }
 
 async function findUserByTelegramId(telegramId) {
@@ -107,6 +158,182 @@ async function findUserByTelegramId(telegramId) {
   return users[0] || null;
 }
 
+async function findUserById(userId) {
+  const [users] = await pool.execute(
+    `SELECT
+       id,
+       fname,
+       lname,
+       phone_number AS phoneNumber,
+       telegram_id AS telegramId,
+       role
+     FROM users
+     WHERE id = ?
+     LIMIT 1`,
+    [userId]
+  );
+  return users[0] || null;
+}
+
+async function findStoreOwnerByStoreName(storeName) {
+  const [owners] = await pool.execute(
+    `SELECT
+       s.id AS storeId,
+       s.store_name AS storeName,
+       u.id AS ownerUserId,
+       u.telegram_id AS ownerTelegramId
+     FROM store s
+     INNER JOIN store_users su ON su.store_id = s.id AND su.role = 'owner'
+     INNER JOIN users u ON u.id = su.user_id
+     WHERE LOWER(s.store_name) = LOWER(?)
+       AND s.is_active = TRUE
+       AND u.telegram_id IS NOT NULL
+     ORDER BY su.created_at ASC, su.id ASC
+     LIMIT 1`,
+    [storeName]
+  );
+  return owners[0] || null;
+}
+
+async function requestInventoryAccess(chatId, sellerUserId, storeName) {
+  const storeOwner = await findStoreOwnerByStoreName(storeName);
+  if (!storeOwner) {
+    await sendMessage(chatId, "Do'kon topilmadi yoki egasi Telegram bilan bog'lanmagan. Do'kon nomini tekshiring.");
+    return false;
+  }
+
+  const [memberships] = await pool.execute(
+    "SELECT id FROM store_users WHERE user_id = ? AND store_id = ? LIMIT 1",
+    [sellerUserId, storeOwner.storeId]
+  );
+  if (memberships.length) {
+    await sendMessage(chatId, `${storeOwner.storeName} omboriga sizda allaqachon ruxsat bor.`, webAppKeyboard());
+    return true;
+  }
+
+  const [pendingRequests] = await pool.execute(
+    `SELECT id
+     FROM inventory_access_requests
+     WHERE seller_user_id = ?
+       AND store_id = ?
+       AND status = 'pending'
+     ORDER BY requested_at DESC
+     LIMIT 1`,
+    [sellerUserId, storeOwner.storeId]
+  );
+
+  const requestId = pendingRequests[0]?.id || (await pool.execute(
+    `INSERT INTO inventory_access_requests (seller_user_id, store_id, status)
+     VALUES (?, ?, 'pending')`,
+    [sellerUserId, storeOwner.storeId]
+  ))[0].insertId;
+
+  const seller = await findUserById(sellerUserId);
+  await sendMessage(
+    storeOwner.ownerTelegramId,
+    `Omborga kirish so'rovi\n\nDo'kon: ${storeOwner.storeName}\nSotuvchi: ${seller.fname} ${seller.lname}\nTelefon: ${seller.phoneNumber}`,
+    {
+      inline_keyboard: [
+        [
+          { text: "Qabul qilish", callback_data: `access:approve:${requestId}` },
+          { text: "Rad etish", callback_data: `access:reject:${requestId}` }
+        ]
+      ]
+    }
+  );
+
+  await sendMessage(chatId, `So'rovingiz ${storeOwner.storeName} egasiga yuborildi. Tasdiqlangandan keyin omborga kira olasiz.`);
+  return true;
+}
+
+async function respondToInventoryAccessRequest(callbackQuery, action, requestId) {
+  const owner = await findUserByTelegramId(callbackQuery.from.id);
+  if (!owner) {
+    await sendMessage(callbackQuery.message.chat.id, "Do'kon egasi akkaunti topilmadi. Avval /start yuboring.");
+    return;
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [requests] = await connection.execute(
+      `SELECT
+         iar.id,
+         iar.seller_user_id AS sellerUserId,
+         iar.store_id AS storeId,
+         iar.status,
+         s.store_name AS storeName,
+         u.telegram_id AS sellerTelegramId
+       FROM inventory_access_requests iar
+       INNER JOIN store s ON s.id = iar.store_id
+       INNER JOIN users u ON u.id = iar.seller_user_id
+       INNER JOIN store_users owner_su
+         ON owner_su.store_id = iar.store_id
+        AND owner_su.user_id = ?
+        AND owner_su.role = 'owner'
+       WHERE iar.id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [owner.id, requestId]
+    );
+
+    const accessRequest = requests[0];
+    if (!accessRequest) {
+      await connection.rollback();
+      await sendMessage(callbackQuery.message.chat.id, "Bu so'rov topilmadi yoki sizning do'koningizga tegishli emas.");
+      return;
+    }
+
+    if (accessRequest.status !== "pending") {
+      await connection.rollback();
+      await sendMessage(callbackQuery.message.chat.id, `Bu so'rov allaqachon ${accessRequest.status}.`);
+      return;
+    }
+
+    const status = action === "approve" ? "approved" : "rejected";
+    await connection.execute(
+      `UPDATE inventory_access_requests
+       SET status = ?, responded_at = NOW(), responded_by_user_id = ?
+       WHERE id = ?`,
+      [status, owner.id, requestId]
+    );
+
+    if (status === "approved") {
+      await connection.execute(
+        `INSERT INTO store_users (user_id, store_id, role)
+         VALUES (?, ?, 'staff')
+         ON DUPLICATE KEY UPDATE role = VALUES(role)`,
+        [accessRequest.sellerUserId, accessRequest.storeId]
+      );
+    }
+
+    await connection.commit();
+
+    await sendMessage(
+      callbackQuery.message.chat.id,
+      status === "approved"
+        ? `${accessRequest.storeName} uchun ruxsat tasdiqlandi.`
+        : `${accessRequest.storeName} uchun ruxsat rad etildi.`
+    );
+
+    if (accessRequest.sellerTelegramId) {
+      await sendMessage(
+        accessRequest.sellerTelegramId,
+        status === "approved"
+          ? `${accessRequest.storeName} omboriga kirish ruxsatingiz tasdiqlandi. Kelish narxi va egaga tegishli maydonlar sizdan yashiriladi.`
+          : `${accessRequest.storeName} uchun kirish so'rovingiz rad etildi.`,
+        status === "approved" ? webAppKeyboard() : undefined
+      );
+    }
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 async function createTelegramUser(profile, data) {
   const connection = await pool.getConnection();
 
@@ -121,7 +348,7 @@ async function createTelegramUser(profile, data) {
     if (existingByPhone.length) {
       const existingUser = existingByPhone[0];
       if (existingUser.telegramId && Number(existingUser.telegramId) !== profile.telegramId) {
-        throw new Error("This phone number is already linked to another Telegram account.");
+        throw new Error("Bu telefon raqami boshqa Telegram akkauntiga ulangan.");
       }
 
       await connection.execute(
@@ -220,9 +447,9 @@ async function showStart(chatId, from) {
   const user = await findUserByTelegramId(profile.telegramId);
 
   if (user) {
-    await sendMessage(chatId, "Welcome back.", webAppKeyboard([
-      [{ text: "👤 Profile", callback_data: "profile" }],
-      [{ text: "❓ Help", callback_data: "help" }]
+    await sendMessage(chatId, "Qaytganingiz bilan.", webAppKeyboard([
+      [{ text: "Profil", callback_data: "profile" }],
+      [{ text: "Yordam", callback_data: "help" }]
     ]));
     return;
   }
@@ -232,9 +459,8 @@ async function showStart(chatId, from) {
     profile,
     data: {}
   });
-
-  await sendMessage(chatId, "👋 Welcome to Shoe Store Inventory\n\nManage your store inventory directly from Telegram.", webAppKeyboard());
-  await sendMessage(chatId, "Welcome!\n\nLet's create your account.\n\nPlease send your first name.");
+  await sendMessage(chatId, "Oyoq kiyim omboriga xush kelibsiz.\n\nDo'kon omborini Telegram orqali boshqaring.", webAppKeyboard());
+  await sendMessage(chatId, "Xush kelibsiz!\n\nKeling, akkauntingizni yaratamiz.\n\nIsmingizni yuboring.");
 }
 
 async function handleContact(chatId, from, contact) {
@@ -242,13 +468,13 @@ async function handleContact(chatId, from, contact) {
   if (!session || session.step !== "phone") return;
 
   if (Number(contact.user_id) !== Number(from.id)) {
-    await sendMessage(chatId, "Please use the Share Phone Number button for your own Telegram account.");
+    await sendMessage(chatId, "Iltimos, o'zingizning Telegram akkauntingiz uchun Telefon raqamni ulashish tugmasidan foydalaning.");
     return;
   }
 
   const phoneNumber = normalizePhone(contact.phone_number);
   if (!phoneNumber) {
-    await sendMessage(chatId, "That phone number format is not valid. Please try again.");
+    await sendMessage(chatId, "Telefon raqami formati noto'g'ri. Qayta urinib ko'ring.");
     return;
   }
 
@@ -256,7 +482,7 @@ async function handleContact(chatId, from, contact) {
   session.step = "account_type";
   sessions.set(chatId, session);
 
-  await sendMessage(chatId, "Choose account type:", accountTypeKeyboard());
+  await sendMessage(chatId, "Akkaunt turini tanlang:", accountTypeKeyboard());
 }
 
 async function handleRegistrationText(chatId, text) {
@@ -266,27 +492,27 @@ async function handleRegistrationText(chatId, text) {
   if (session.step === "first_name") {
     const firstName = cleanText(text);
     if (!firstName || firstName.length > 20) {
-      await sendMessage(chatId, "Please send a first name up to 20 characters.");
+      await sendMessage(chatId, "Ism 20 ta belgidan oshmasin.");
       return true;
     }
     session.data.firstName = firstName;
     session.step = "last_name";
     sessions.set(chatId, session);
-    await sendMessage(chatId, "Please send your last name.");
+    await sendMessage(chatId, "Familiyangizni yuboring.");
     return true;
   }
 
   if (session.step === "last_name") {
     const lastName = cleanText(text);
     if (!lastName || lastName.length > 20) {
-      await sendMessage(chatId, "Please send a last name up to 20 characters.");
+      await sendMessage(chatId, "Familiya 20 ta belgidan oshmasin.");
       return true;
     }
     session.data.lastName = lastName;
     session.step = "phone";
     sessions.set(chatId, session);
-    await sendMessage(chatId, "Please share your phone number.", {
-      keyboard: [[{ text: "📱 Share Phone Number", request_contact: true }]],
+    await sendMessage(chatId, "Telefon raqamingizni ulashing.", {
+      keyboard: [[{ text: "Telefon raqamni ulashish", request_contact: true }]],
       resize_keyboard: true,
       one_time_keyboard: true
     });
@@ -296,11 +522,25 @@ async function handleRegistrationText(chatId, text) {
   if (session.step === "store_name") {
     const storeName = cleanText(text);
     if (!storeName || storeName.length > 50) {
-      await sendMessage(chatId, "Store name must be 1-50 characters.");
+      await sendMessage(chatId, "Do'kon nomi 1-50 ta belgi bo'lishi kerak.");
       return true;
     }
     session.data.storeName = storeName;
     await finishRegistration(chatId, session);
+    return true;
+  }
+
+  if (session.step === "seller_store_name") {
+    const storeName = cleanText(text);
+    if (!storeName || storeName.length > 50) {
+      await sendMessage(chatId, "Do'kon nomi 1-50 ta belgi bo'lishi kerak.");
+      return true;
+    }
+
+    const requested = await requestInventoryAccess(chatId, session.userId, storeName);
+    if (requested) {
+      sessions.delete(chatId);
+    }
     return true;
   }
 
@@ -310,7 +550,7 @@ async function handleRegistrationText(chatId, text) {
 async function finishRegistration(chatId, session) {
   await createTelegramUser(session.profile, session.data);
   sessions.delete(chatId);
-  await sendMessage(chatId, "Account created. You can now open the inventory dashboard.", webAppKeyboard());
+  await sendMessage(chatId, "Akkaunt yaratildi. Endi ombor panelini ochishingiz mumkin.", webAppKeyboard());
 }
 
 async function handleCallback(callbackQuery) {
@@ -323,14 +563,25 @@ async function handleCallback(callbackQuery) {
     await sendMessage(
       chatId,
       user
-        ? `👤 Profile\n\nName: ${user.fname} ${user.lname}\nRole: ${user.role}\nStore: ${user.storeName || "Not assigned"}`
-        : "Profile not found. Please send /start."
+        ? `Profil\n\nIsm: ${user.fname} ${user.lname}\nRol: ${user.role}\nDo'kon: ${user.storeName || "Biriktirilmagan"}`
+        : "Profil topilmadi. /start yuboring."
     );
     return;
   }
 
   if (data === "help") {
-    await sendMessage(chatId, "Press 📦 Open Inventory to launch the web dashboard inside Telegram.");
+    await sendMessage(chatId, "Telegram ichida ombor panelini ochish uchun Omborni ochish tugmasini bosing.");
+    return;
+  }
+
+  if (data.startsWith("access:")) {
+    const [, action, requestIdText] = data.split(":");
+    const requestId = Number(requestIdText);
+    if (!["approve", "reject"].includes(action) || !Number.isInteger(requestId) || requestId <= 0) {
+      await sendMessage(chatId, "Kirish so'rovi amali noto'g'ri.");
+      return;
+    }
+    await respondToInventoryAccessRequest(callbackQuery, action, requestId);
     return;
   }
 
@@ -338,13 +589,13 @@ async function handleCallback(callbackQuery) {
 
   const session = sessions.get(chatId);
   if (!session || session.step !== "account_type") {
-    await sendMessage(chatId, "Please send /start to begin registration.");
+    await sendMessage(chatId, "Ro'yxatdan o'tishni boshlash uchun /start yuboring.");
     return;
   }
 
   const accountType = data.slice("account:".length);
   if (!["seller", "store_owner"].includes(accountType)) {
-    await sendMessage(chatId, "Please choose Seller or Store Owner.");
+    await sendMessage(chatId, "Sotuvchi yoki Do'kon egasini tanlang.");
     return;
   }
 
@@ -353,11 +604,15 @@ async function handleCallback(callbackQuery) {
   if (accountType === "store_owner") {
     session.step = "store_name";
     sessions.set(chatId, session);
-    await sendMessage(chatId, "Please send your store name.");
+    await sendMessage(chatId, "Do'kon nomini yuboring.");
     return;
   }
 
-  await finishRegistration(chatId, session);
+  const created = await createTelegramUser(session.profile, session.data);
+  session.userId = created.userId;
+  session.step = "seller_store_name";
+  sessions.set(chatId, session);
+  await sendMessage(chatId, "Akkaunt yaratildi. Omborga kirish so'rovini yuborish uchun do'kon nomini kiriting.");
 }
 
 async function handleUpdate(update) {
@@ -384,11 +639,12 @@ async function handleUpdate(update) {
     return;
   }
 
-  await sendMessage(chatId, "Send /start to open your inventory options.");
+  await sendMessage(chatId, "Ombor imkoniyatlarini ochish uchun /start yuboring.");
 }
 
 async function startBot() {
   await testConnection();
+  await ensureInventoryAccessRequestsTable();
   let offset = 0;
   console.log("Telegram inventory bot is running.");
 

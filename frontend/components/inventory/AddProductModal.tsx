@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { api, Product, Metadata, ProductLookup } from '@/lib/api';
 import { X, Plus, Minus, ChevronRight, ChevronLeft } from 'lucide-react';
-import { SHOE_SIZES } from '@/lib/constants';
+import { SHOE_SIZES, seasonLabel } from '@/lib/constants';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -12,16 +12,17 @@ interface AddProductModalProps {
   editingProduct?: Product;
   metadata: Metadata;
   isSubmitting?: boolean;
+  canViewSensitiveFields?: boolean;
 }
 
 type Step = 'basic' | 'details' | 'pricing' | 'images' | 'inventory';
 
 const STEPS: { id: Step; label: string }[] = [
-  { id: 'basic', label: 'Basic Info' },
-  { id: 'details', label: 'Details' },
-  { id: 'images', label: 'Images' },
-  { id: 'pricing', label: 'Pricing' },
-  { id: 'inventory', label: 'Inventory' },
+  { id: 'basic', label: 'Asosiy' },
+  { id: 'details', label: 'Tafsilotlar' },
+  { id: 'images', label: 'Rasmlar' },
+  { id: 'pricing', label: 'Narxlar' },
+  { id: 'inventory', label: 'Ombor' },
 ];
 
 const emptyProductForm = (): Product => ({
@@ -47,6 +48,7 @@ export function AddProductModal({
   editingProduct,
   metadata,
   isSubmitting = false,
+  canViewSensitiveFields = true,
 }: AddProductModalProps) {
   const [currentStep, setCurrentStep] = useState<Step>('basic');
   const [formData, setFormData] = useState<Product>(
@@ -63,7 +65,7 @@ export function AddProductModal({
       .filter((image) => image.tempId)
       .forEach((image) => {
         api.deleteTempProductImage(image.tempId!).catch((error) => {
-          console.error('[v0] Failed to delete temporary image:', error);
+          console.error('[v0] Vaqtinchalik rasmni o\'chirishda xatolik:', error);
         });
       });
   }, []);
@@ -145,7 +147,7 @@ export function AddProductModal({
                 ? {
                     ...image,
                     uploading: false,
-                    error: error instanceof Error ? error.message : 'Upload failed',
+                    error: error instanceof Error ? error.message : 'Yuklashda xatolik',
                   }
                 : image
             ),
@@ -164,7 +166,7 @@ export function AddProductModal({
       const image = prev.images[index];
       if (image?.tempId && !image.uploading && !image.error) {
         api.deleteTempProductImage(image.tempId).catch((error) => {
-          console.error('[v0] Failed to delete temporary image:', error);
+          console.error('[v0] Vaqtinchalik rasmni o\'chirishda xatolik:', error);
         });
       }
       return {
@@ -200,19 +202,19 @@ export function AddProductModal({
 
   const handleSubmit = async () => {
     if (!formData.artNo || !formData.type || !formData.colour || !formData.material) {
-      setSubmitError('Please fill in all required fields.');
+      setSubmitError('Barcha majburiy maydonlarni to\'ldiring.');
       return;
     }
     if (!formData.seasons.length) {
-      setSubmitError('Please select at least one season.');
+      setSubmitError('Kamida bitta mavsum tanlang.');
       return;
     }
     if (formData.images.some((image) => image.uploading)) {
-      setSubmitError('Please wait until image uploads finish.');
+      setSubmitError('Rasmlar yuklanib bo\'lishini kuting.');
       return;
     }
     if (formData.images.some((image) => image.error)) {
-      setSubmitError('Remove failed image uploads before saving.');
+      setSubmitError('Saqlashdan oldin yuklanmagan rasmlarni olib tashlang.');
       return;
     }
     try {
@@ -227,13 +229,13 @@ export function AddProductModal({
       setCurrentStep('basic');
       onClose();
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : 'Failed to save product.');
-      console.error('[v0] Error saving product:', error);
+      setSubmitError(error instanceof Error ? error.message : 'Mahsulotni saqlashda xatolik.');
+      console.error('[v0] Mahsulotni saqlashda xatolik:', error);
     }
   };
 
   const handleClose = () => {
-    if (unsavedChanges && !window.confirm('You have unsaved changes. Are you sure you want to close?')) {
+    if (unsavedChanges && !window.confirm('Saqlanmagan o\'zgarishlar bor. Yopishni xohlaysizmi?')) {
       return;
     }
     setFormData(emptyProductForm());
@@ -303,13 +305,13 @@ export function AddProductModal({
             type: lookup.product.type,
             seasons: lookup.product.seasons,
             price: lookup.product.price,
-            landingPrice: lookup.product.landingPrice,
+            landingPrice: lookup.product.landingPrice || 0,
           }));
         }
       } catch (error) {
         if (!cancelled) {
           setArtLookup(null);
-          setSubmitError(error instanceof Error ? error.message : 'Failed to check art number.');
+          setSubmitError(error instanceof Error ? error.message : 'Art raqamini tekshirishda xatolik.');
         }
       } finally {
         if (!cancelled) setLookupLoading(false);
@@ -330,7 +332,7 @@ export function AddProductModal({
       return {
         ...prev,
         price: artLookup.product.price,
-        landingPrice: artLookup.product.landingPrice,
+        landingPrice: artLookup.product.landingPrice || 0,
         images: [],
       };
     });
@@ -354,7 +356,7 @@ export function AddProductModal({
             {/* Header */}
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-800">
               <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                {editingProduct ? 'Edit Product' : 'Add New Product'}
+                {editingProduct ? 'Mahsulotni tahrirlash' : 'Yangi mahsulot qo\'shish'}
               </h2>
               <button
                 onClick={handleClose}
@@ -398,28 +400,28 @@ export function AddProductModal({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Art Number <span className="text-red-600">*</span>
+                      Art raqami <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="text"
                       value={formData.artNo}
                       onChange={(e) => handleArtNoChange(e.target.value)}
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                      placeholder="e.g., ART-001"
+                      placeholder="masalan, ART-001"
                     />
                     {lookupLoading && (
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Checking art number...</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Art raqami tekshirilmoqda...</p>
                     )}
                     {hasExistingArt && (
                       <p className="mt-1 text-xs font-medium text-green-700 dark:text-green-300">
-                        Existing art number found. Product details were filled automatically.
+                        Bu art raqami mavjud. Mahsulot ma'lumotlari avtomatik to'ldirildi.
                       </p>
                     )}
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Product Name
+                      Mahsulot nomi
                     </label>
                     <input
                       type="text"
@@ -427,13 +429,13 @@ export function AddProductModal({
                       onChange={(e) => handleFieldChange('name', e.target.value)}
                       disabled={hasExistingArt}
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                      placeholder="e.g., Classic Sneaker"
+                      placeholder="masalan, Klassik krossovka"
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Type <span className="text-red-600">*</span>
+                      Turi <span className="text-red-600">*</span>
                     </label>
                     <select
                       value={formData.type}
@@ -441,7 +443,7 @@ export function AddProductModal({
                       disabled={hasExistingArt}
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
                     >
-                      <option value="">Select Type</option>
+                      <option value="">Turini tanlang</option>
                       {metadata.types.map((type) => (
                         <option key={type} value={type}>
                           {type}
@@ -452,7 +454,7 @@ export function AddProductModal({
 
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Seasons
+                      Mavsumlar
                     </label>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {metadata.seasons.map((season) => (
@@ -466,7 +468,7 @@ export function AddProductModal({
                               : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
                           }`}
                         >
-                          {season}
+                          {seasonLabel(season)}
                         </button>
                       ))}
                     </div>
@@ -479,14 +481,14 @@ export function AddProductModal({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Colour <span className="text-red-600">*</span>
+                      Rang <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="text"
                       value={formData.colour}
                       onChange={(e) => handleFieldChange('colour', e.target.value)}
                       className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                      placeholder="e.g., Red, Black, etc."
+                      placeholder="masalan, qizil, qora va h.k."
                     />
                     {suggestedColours.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -513,7 +515,7 @@ export function AddProductModal({
                       value={formData.material}
                       onChange={(e) => handleFieldChange('material', e.target.value)}
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                      placeholder="e.g., Leather, Suede, etc."
+                      placeholder="masalan, charm, zamsh va h.k."
                     />
                     {suggestedMaterials.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -531,7 +533,7 @@ export function AddProductModal({
                     )}
                     {exactVariant && (
                       <p className="mt-3 rounded-lg bg-green-50 p-3 text-xs font-medium text-green-700 dark:bg-green-950 dark:text-green-300">
-                        This colour and material already exist for the art number. Pricing and images will be skipped; entered size quantities will be added to existing stock.
+                        Bu art raqami uchun ushbu rang va material allaqachon mavjud. Narx va rasmlar bosqichi o'tkazib yuboriladi; kiritilgan o'lcham sonlari mavjud qoldiqqa qo'shiladi.
                       </p>
                     )}
                   </div>
@@ -543,7 +545,7 @@ export function AddProductModal({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
-                      Product Images
+                      Mahsulot rasmlari
                     </label>
                     <div className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-6 text-center dark:border-gray-700 dark:bg-gray-800">
                       <input
@@ -558,9 +560,9 @@ export function AddProductModal({
                         <div className="flex flex-col items-center">
                           <Plus className="h-8 w-8 text-gray-400" />
                           <p className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Click to upload or drag and drop
+                            Yuklash uchun bosing yoki faylni shu yerga tashlang
                           </p>
-                          <p className="text-xs text-gray-500">PNG, JPG, GIF up to 10MB</p>
+                          <p className="text-xs text-gray-500">PNG, JPG, GIF, 10MB gacha</p>
                         </div>
                       </label>
                     </div>
@@ -569,11 +571,11 @@ export function AddProductModal({
                   {formData.images.length > 0 && (
                     <div>
                       <p className="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-                        Uploaded Images ({formData.images.length})
+                        Yuklangan rasmlar ({formData.images.length})
                       </p>
                       {hasUploadingImages && (
                         <p className="mb-2 text-xs text-blue-600 dark:text-blue-300">
-                          Uploading images in the background...
+                          Rasmlar yuklanmoqda...
                         </p>
                       )}
                       <div className="grid grid-cols-3 gap-2">
@@ -581,12 +583,12 @@ export function AddProductModal({
                           <div key={index} className="relative aspect-square">
                             <img
                               src={image.path || image.data || ''}
-                              alt={`Product ${index + 1}`}
+                              alt={`Mahsulot ${index + 1}`}
                               className="h-full w-full rounded-lg object-cover"
                             />
                             {(image.uploading || image.error) && (
                               <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/55 px-2 text-center text-xs font-medium text-white">
-                                {image.uploading ? 'Uploading...' : image.error}
+                                {image.uploading ? 'Yuklanmoqda...' : image.error}
                               </div>
                             )}
                             <button
@@ -608,7 +610,7 @@ export function AddProductModal({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Selling Price <span className="text-red-600">*</span>
+                      Sotuv narxi <span className="text-red-600">*</span>
                     </label>
                     <div className="relative mt-1">
                       <input
@@ -617,30 +619,32 @@ export function AddProductModal({
                         value={formData.price}
                         onChange={(e) => handleFieldChange('price', e.target.value)}
                         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                        placeholder="Enter selling price"
+                        placeholder="Sotuv narxini kiriting"
                       />
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Landing Price <span className="text-red-600">*</span>
-                    </label>
-                    <div className="relative mt-1">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={formData.landingPrice}
-                        onChange={(e) => handleFieldChange('landingPrice', e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                        placeholder="Enter landing price"
-                      />
+                  {canViewSensitiveFields && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+                        Kelish narxi <span className="text-red-600">*</span>
+                      </label>
+                      <div className="relative mt-1">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={formData.landingPrice}
+                          onChange={(e) => handleFieldChange('landingPrice', e.target.value)}
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
+                          placeholder="Kelish narxini kiriting"
+                        />
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  {sellingPrice > 0 && landingPrice > 0 && (
+                  {canViewSensitiveFields && sellingPrice > 0 && landingPrice > 0 && (
                     <div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-950">
-                      <p className="text-xs text-blue-600 dark:text-blue-400">Profit Margin</p>
+                      <p className="text-xs text-blue-600 dark:text-blue-400">Foyda marjasi</p>
                       <p className="text-lg font-bold text-blue-700 dark:text-blue-300">
                         {(sellingPrice - landingPrice).toLocaleString()} ({(((sellingPrice - landingPrice) / landingPrice) * 100).toFixed(1)}%)
                       </p>
@@ -653,7 +657,7 @@ export function AddProductModal({
               {currentStep === 'inventory' && (
                 <div className="space-y-4">
                   <div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-950">
-                    <p className="text-xs text-blue-600 dark:text-blue-400">Total Stock</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">Jami qoldiq</p>
                     <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
                       {totalInventory}
                     </p>
@@ -661,7 +665,7 @@ export function AddProductModal({
 
                   <div>
                     <p className="mb-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Sizes & Quantities
+                      O'lchamlar va soni
                     </p>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {formData.inventory.map((item) => (
@@ -674,7 +678,7 @@ export function AddProductModal({
                           }`}
                         >
                           <p className="text-center text-sm font-bold text-gray-900 dark:text-gray-100">
-                            Size {item.size}
+                            O'lcham {item.size}
                           </p>
                           <div className="mt-2 flex items-center justify-between gap-1">
                             <button
@@ -709,7 +713,7 @@ export function AddProductModal({
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
               >
                 <ChevronLeft className="inline mr-1 h-4 w-4" />
-                Previous
+                Oldingi
               </button>
 
               {!isLastStep && (
@@ -717,7 +721,7 @@ export function AddProductModal({
                   onClick={nextStep}
                   className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
                 >
-                  Next
+                  Keyingi
                   <ChevronRight className="inline ml-1 h-4 w-4" />
                 </button>
               )}
@@ -728,7 +732,7 @@ export function AddProductModal({
                   disabled={isSubmitting || hasUploadingImages || hasFailedImages}
                   className="flex-1 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 dark:bg-green-600 dark:hover:bg-green-700"
                 >
-                  {isSubmitting ? 'Saving...' : hasUploadingImages ? 'Uploading images...' : 'Save Product'}
+                  {isSubmitting ? 'Saqlanmoqda...' : hasUploadingImages ? 'Rasmlar yuklanmoqda...' : 'Mahsulotni saqlash'}
                 </button>
               )}
             </div>

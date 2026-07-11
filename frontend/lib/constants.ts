@@ -12,3 +12,14 @@ export const LOW_STOCK_THRESHOLD = 5;
 
 export type SizeType = (typeof SHOE_SIZES)[number];
 export type StockStatus = (typeof STOCK_STATUS)[keyof typeof STOCK_STATUS];
+
+export const SEASON_LABELS: Record<string, string> = {
+  Spring: 'Bahor',
+  Summer: 'Yoz',
+  Autumn: 'Kuz',
+  Winter: 'Qish',
+};
+
+export function seasonLabel(season: string) {
+  return SEASON_LABELS[season] || season;
+}

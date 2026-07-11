@@ -14,9 +14,9 @@ interface ProductTableProps {
 
 function getStockStatus(inventory: { size: number; quantity: number }[]) {
   const total = inventory.reduce((sum, item) => sum + item.quantity, 0);
-  if (total === 0) return { status: STOCK_STATUS.OUT_OF_STOCK, label: 'Out of Stock', color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' };
-  if (total < LOW_STOCK_THRESHOLD) return { status: STOCK_STATUS.LOW_STOCK, label: 'Low Stock', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200' };
-  return { status: STOCK_STATUS.IN_STOCK, label: 'In Stock', color: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' };
+  if (total === 0) return { status: STOCK_STATUS.OUT_OF_STOCK, label: 'Tugagan', color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' };
+  if (total < LOW_STOCK_THRESHOLD) return { status: STOCK_STATUS.LOW_STOCK, label: 'Kam qolgan', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200' };
+  return { status: STOCK_STATUS.IN_STOCK, label: 'Mavjud', color: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' };
 }
 
 function getTotalStock(inventory: { size: number; quantity: number }[]) {
@@ -94,7 +94,7 @@ function MobileProductCard({
                 </span>
               ))
             ) : (
-              <span className="text-[11px] text-gray-500 dark:text-gray-400">No sizes in stock</span>
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">Omborda o'lcham yo'q</span>
             )}
           </div>
         </div>
@@ -116,15 +116,15 @@ function DesktopProductTable({
       <table className="w-full text-sm">
         <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
           <tr>
-            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Image</th>
+            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rasm</th>
             <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Art No</th>
-            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Product Name</th>
-            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Type</th>
-            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Colour</th>
+            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Mahsulot nomi</th>
+            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Turi</th>
+            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rangi</th>
             <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Material</th>
-            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Price</th>
-            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sizes</th>
-            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Status</th>
+            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Narx</th>
+            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">O'lchamlar</th>
+            <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Holat</th>
           </tr>
         </thead>
         <tbody>
@@ -155,7 +155,7 @@ function DesktopProductTable({
                       />
                     ) : (
                       <div className="flex items-center justify-center h-full text-gray-400">
-                        <div className="text-xs">No image</div>
+                        <div className="text-xs">Rasm yo'q</div>
                       </div>
                     )}
                   </div>
@@ -201,7 +201,7 @@ function DesktopProductTable({
                         </span>
                       ))
                     ) : (
-                      <span className="text-xs text-gray-500 dark:text-gray-400">No stock</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Omborda yo'q</span>
                     )}
                   </div>
                 </td>
@@ -233,7 +233,7 @@ export function ProductTable({
         <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
         <input
           type="text"
-          placeholder="Search by Art No, Product Name, Colour, Material, Type..."
+          placeholder="Art No, mahsulot nomi, rang, material yoki turi bo'yicha qidirish..."
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm font-medium text-gray-950 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:placeholder-gray-400"
@@ -244,7 +244,7 @@ export function ProductTable({
       {searchQuery && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-gray-600 dark:text-gray-400">
-            Found <span className="font-semibold">{products.length}</span> products
+            <span className="font-semibold">{products.length}</span> ta mahsulot topildi
           </p>
         </div>
       )}
@@ -261,10 +261,10 @@ export function ProductTable({
         <div className="rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 py-8 text-center dark:border-gray-800 dark:bg-gray-900">
           <Package className="mx-auto h-10 w-10 text-gray-400 dark:text-gray-600" />
           <p className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-            {searchQuery ? 'No products found' : 'No products yet'}
+            {searchQuery ? 'Mahsulot topilmadi' : 'Hali mahsulot yo\'q'}
           </p>
           <p className="text-xs text-gray-600 dark:text-gray-400">
-            {searchQuery ? 'Try adjusting your search' : 'Add your first product to get started'}
+            {searchQuery ? 'Qidiruv so\'zini o\'zgartirib ko\'ring' : 'Boshlash uchun birinchi mahsulotni qo\'shing'}
           </p>
         </div>
       )}

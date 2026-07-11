@@ -17,28 +17,28 @@ export function DashboardCards({
 }: DashboardCardsProps) {
   const cards = [
     {
-      label: 'Total Products',
+      label: 'Jami mahsulotlar',
       value: totalProducts,
       icon: Package,
       color: 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400',
       trend: null,
     },
     {
-      label: 'Total Stock',
+      label: 'Jami qoldiq',
       value: totalStock,
       icon: Zap,
       color: 'bg-green-50 text-green-600 dark:bg-green-950 dark:text-green-400',
       trend: null,
     },
     {
-      label: 'Low Stock',
+      label: 'Kam qolgan',
       value: lowStockCount,
       icon: AlertCircle,
       color: 'bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400',
       trend: lowStockCount > 0 ? 'warning' : null,
     },
     {
-      label: 'Out of Stock',
+      label: 'Tugagan',
       value: outOfStockCount,
       icon: AlertCircle,
       color: 'bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400',
@@ -77,7 +77,7 @@ export function DashboardCards({
                       : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200'
                   }`}
                 >
-                  {card.trend === 'warning' ? 'Needs attention' : 'Action required'}
+                  {card.trend === 'warning' ? 'E\'tibor kerak' : 'Amal kerak'}
                 </span>
               </div>
             )}

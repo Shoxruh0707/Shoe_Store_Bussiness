@@ -38,7 +38,7 @@ export interface Product {
   colour: string;
   material: string;
   price: number;
-  landingPrice: number;
+  landingPrice?: number;
   inventory: InventoryItem[];
   images: ProductImage[];
   createdAt?: string;
@@ -84,15 +84,16 @@ export interface SoldProductResponse {
 }
 
 export interface SoldProductAnalyticsItem {
-  id: number;
+  id: string | number;
   artNo: string;
   name: string;
   colour: string;
   material: string;
   size: string;
-  quantity: number;
-  soldPrice: number;
-  landingPrice: number;
+  quantity?: number;
+  soldPrice?: number;
+  landingPrice?: number;
+  sellerName?: string;
   soldAt: string;
   imagePath?: string;
 }
@@ -108,6 +109,21 @@ export interface APIResponse<T> {
   message?: string;
   data?: T;
   error?: string;
+}
+
+export interface AuthMe {
+  user: {
+    id: number;
+    fname: string;
+    lname: string;
+    phoneNumber: string;
+    role: string;
+  };
+  store: {
+    id: number;
+    storeName: string;
+    storeRole?: 'owner' | 'manager' | 'staff';
+  } | null;
 }
 
 class APIClient {
@@ -136,6 +152,7 @@ class APIClient {
   private normalizeProduct(product: Product): Product {
     return {
       ...product,
+      ...(product.landingPrice === undefined ? {} : { landingPrice: Number(product.landingPrice || 0) }),
       inventory: (product.inventory || []).map((item) => ({
         size: Number(item.size),
         quantity: Number(item.quantity || 0),
@@ -154,9 +171,9 @@ class APIClient {
   private normalizeSoldProduct(item: SoldProductAnalyticsItem): SoldProductAnalyticsItem {
     return {
       ...item,
-      quantity: Number(item.quantity || 0),
-      soldPrice: Number(item.soldPrice || 0),
-      landingPrice: Number(item.landingPrice || 0),
+      ...(item.quantity === undefined ? {} : { quantity: Number(item.quantity || 0) }),
+      ...(item.soldPrice === undefined ? {} : { soldPrice: Number(item.soldPrice || 0) }),
+      ...(item.landingPrice === undefined ? {} : { landingPrice: Number(item.landingPrice || 0) }),
       imagePath:
         item.imagePath && item.imagePath.startsWith('/') && this.assetBaseUrl
           ? `${this.assetBaseUrl}${item.imagePath}`
@@ -198,7 +215,7 @@ class APIClient {
       const error = contentType.includes('application/json')
         ? await response.json().catch(() => ({}))
         : { message: await response.text().catch(() => '') };
-      throw new Error(error.error || error.message || `API Error: ${response.statusText || response.status}`);
+      throw new Error(error.error || error.message || `API xatosi: ${response.statusText || response.status}`);
     }
 
     return response.json();
@@ -211,6 +228,10 @@ class APIClient {
   async getMetadata(): Promise<Metadata> {
     const response = await this.request<{ data: Metadata }>('GET', '/meta');
     return response.data || { types: [], seasons: [], colours: [], materials: [] };
+  }
+
+  async getAuthMe(): Promise<AuthMe> {
+    return this.request('GET', '/auth/me');
   }
 
   async getProducts(): Promise<Product[]> {
@@ -236,7 +257,7 @@ class APIClient {
     const data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('Failed to read image file'));
+      reader.onerror = () => reject(new Error('Rasm faylini o\'qishda xatolik'));
       reader.readAsDataURL(file);
     });
 

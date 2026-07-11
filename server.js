@@ -516,6 +516,57 @@ async function ensureSoldProductsTable() {
   }
 }
 
+async function ensureInventoryAccessRequestsTable() {
+  await pool.execute(
+    `CREATE TABLE IF NOT EXISTS inventory_access_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      seller_user_id INT NOT NULL,
+      store_id INT NOT NULL,
+      status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+      requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      responded_at DATETIME NULL,
+      responded_by_user_id INT NULL,
+
+      CONSTRAINT fk_inventory_access_requests_seller
+        FOREIGN KEY (seller_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+      CONSTRAINT fk_inventory_access_requests_store
+        FOREIGN KEY (store_id) REFERENCES store(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+      CONSTRAINT fk_inventory_access_requests_responder
+        FOREIGN KEY (responded_by_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+  );
+
+  const indexes = [
+    ["idx_inventory_access_requests_seller", "seller_user_id"],
+    ["idx_inventory_access_requests_store", "store_id"],
+    ["idx_inventory_access_requests_status", "status"]
+  ];
+
+  for (const [indexName, columnName] of indexes) {
+    const [existing] = await pool.execute(
+      `SELECT 1
+       FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'inventory_access_requests'
+         AND INDEX_NAME = ?
+       LIMIT 1`,
+      [indexName]
+    );
+
+    if (!existing.length) {
+      await pool.query(`CREATE INDEX \`${indexName}\` ON inventory_access_requests(\`${columnName}\`)`);
+    }
+  }
+}
+
 function validateSoldProductPayload(payload) {
   const artNo = cleanText(payload?.art_no);
   const colourName = cleanText(payload?.colour_name);
@@ -524,12 +575,12 @@ function validateSoldProductPayload(payload) {
   const soldPrice = parseNonNegativeDecimal(payload?.sold_price);
   const quantity = Number(payload?.quantity || 1);
 
-  if (!artNo) return { error: "Art number is required." };
-  if (!colourName) return { error: "Color is required." };
-  if (!materialType) return { error: "Material type is required." };
-  if (!SIZES.includes(size)) return { error: "Valid size is required." };
-  if (soldPrice === null) return { error: "Sold price must be a valid number greater than or equal to 0." };
-  if (!Number.isInteger(quantity) || quantity <= 0) return { error: "Quantity sold must be a positive whole number." };
+  if (!artNo) return { error: "Art raqami kiritilishi kerak." };
+  if (!colourName) return { error: "Rang kiritilishi kerak." };
+  if (!materialType) return { error: "Material turi kiritilishi kerak." };
+  if (!SIZES.includes(size)) return { error: "To'g'ri o'lcham tanlanishi kerak." };
+  if (soldPrice === null) return { error: "Sotuv narxi 0 yoki undan katta to'g'ri son bo'lishi kerak." };
+  if (!Number.isInteger(quantity) || quantity <= 0) return { error: "Sotilgan son musbat butun son bo'lishi kerak." };
 
   return {
     sale: {
@@ -764,8 +815,51 @@ function requireStoreOwner(request, response, next) {
   next();
 }
 
+function requireStoreOwnerRole(request, response, next) {
+  if (request.user?.role === "admin" || request.store?.storeRole === "owner") {
+    next();
+    return;
+  }
+
+  apiMessage(response, "Bu amal faqat do'kon egasi uchun.", 403);
+}
+
+function requireStoreWriteAccess(request, response, next) {
+  if (request.user?.role === "admin" || ["owner", "manager"].includes(request.store?.storeRole)) {
+    next();
+    return;
+  }
+
+  apiMessage(response, "Sotuvchi omborni ko'rishi mumkin, lekin mahsulotlarni o'zgartira olmaydi.", 403);
+}
+
 function currentStoreId(request) {
   return request.store?.id || defaultStoreId;
+}
+
+function canViewSensitiveInventoryFields(request) {
+  return request.user?.role === "admin" || ["owner", "manager"].includes(request.store?.storeRole);
+}
+
+function redactProductForAccess(product, request) {
+  if (!product || canViewSensitiveInventoryFields(request)) return product;
+  const { landingPrice: _landingPrice, ...safeProduct } = product;
+  return safeProduct;
+}
+
+function redactProductLookupForAccess(lookup, request) {
+  if (!lookup || canViewSensitiveInventoryFields(request)) return lookup;
+  const { landingPrice: _landingPrice, ...safeProduct } = lookup.product || {};
+  return {
+    ...lookup,
+    product: safeProduct
+  };
+}
+
+function redactSoldProductForAccess(item, request) {
+  if (canViewSensitiveInventoryFields(request)) return item;
+  const { landingPrice: _landingPrice, ...safeItem } = item;
+  return safeItem;
 }
 
 async function writeInventoryRows(connection, variantId, price, inventory, storeId) {
@@ -835,7 +929,9 @@ async function findMatchingProductVariant(connection, data, colourId, materialId
 
 async function findProductByArtNo(connection, artNo) {
   const [matches] = await connection.execute(
-    `SELECT p.id AS productId
+    `SELECT
+       p.id AS productId,
+       p.landing_price AS landingPrice
      FROM products p
      WHERE p.art_no = ?
      ORDER BY p.updated_at DESC, p.created_at DESC
@@ -1098,9 +1194,9 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
        INNER JOIN colours c ON c.id = pv.colour_id
        INNER JOIN materials m ON m.id = pv.material_id
        INNER JOIN inventory i ON i.product_variant_id = pv.id
-       WHERE p.art_no = ?
-         AND c.colour_name = ?
-         AND m.material_type = ?
+       WHERE LOWER(TRIM(p.art_no)) = LOWER(TRIM(?))
+         AND LOWER(TRIM(c.colour_name)) = LOWER(TRIM(?))
+         AND LOWER(TRIM(m.material_type)) = LOWER(TRIM(?))
          AND i.size = ?
          AND i.store_id = ?
        ORDER BY p.updated_at DESC, p.created_at DESC
@@ -1112,20 +1208,20 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
     const match = matches[0];
     if (!match) {
       await connection.rollback();
-      apiMessage(response, "Product not found in inventory", 404);
+      apiMessage(response, "Mahsulot omborda topilmadi.", 404);
       return;
     }
 
     if (Number(match.quantity || 0) < sale.quantity) {
       await connection.rollback();
-      apiMessage(response, "Not enough quantity in inventory", 400);
+      apiMessage(response, "Omborda yetarli miqdor yo'q.", 400);
       return;
     }
 
     const saleUserId = await userIdForSale(connection, request);
     if (!saleUserId) {
       await connection.rollback();
-      apiMessage(response, "Valid seller user was not found for sale history", 403);
+      apiMessage(response, "Sotuv tarixi uchun sotuvchi foydalanuvchi topilmadi.", 403);
       return;
     }
 
@@ -1152,7 +1248,7 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
 
     response.json({
       success: true,
-      message: "Product marked as sold successfully",
+      message: "Mahsulot sotilgan deb belgilandi",
       remaining_quantity: remainingQuantity
     });
   } catch (error) {
@@ -1167,8 +1263,14 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
   try {
     const saleDate = normalizeSoldProductsDate(request.query.date);
     if (!saleDate) {
-      apiMessage(response, "Valid date is required.", 400);
+      apiMessage(response, "To'g'ri sana kiritilishi kerak.", 400);
       return;
+    }
+
+    const canViewAllSoldProducts = canViewSensitiveInventoryFields(request);
+    const params = [currentStoreId(request), saleDate, saleDate];
+    if (!canViewAllSoldProducts) {
+      params.push(request.user.id);
     }
 
     const [rows] = await pool.execute(
@@ -1179,6 +1281,11 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
          sp.sold_price AS soldPrice,
          sp.landing_price AS landingPrice,
          sp.sold_at AS soldAt,
+         COALESCE(
+           NULLIF(TRIM(CONCAT_WS(' ', NULLIF(TRIM(u.fname), ''), NULLIF(TRIM(u.lname), ''))), ''),
+           NULLIF(TRIM(u.fname), ''),
+           NULLIF(TRIM(u.lname), '')
+         ) AS sellerName,
          p.art_no AS artNo,
          p.name,
          c.colour_name AS colour,
@@ -1195,21 +1302,35 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
        INNER JOIN products p ON p.id = pv.product_id
        INNER JOIN colours c ON c.id = pv.colour_id
        INNER JOIN materials m ON m.id = pv.material_id
+       LEFT JOIN users u ON u.id = sp.user_id
        WHERE sp.store_id = ?
          AND sp.sold_at >= ?
          AND sp.sold_at < DATE_ADD(?, INTERVAL 1 DAY)
+         ${canViewAllSoldProducts ? "" : "AND sp.user_id = ?"}
        ORDER BY sp.sold_at DESC, sp.id DESC`,
-      [currentStoreId(request), saleDate, saleDate]
+      params
     );
 
     apiData(response, {
       date: saleDate,
-      items: rows.map((row) => ({
-        ...row,
-        quantity: Number(row.quantity || 0),
-        soldPrice: Number(row.soldPrice || 0),
-        landingPrice: Number(row.landingPrice || 0)
-      }))
+      items: rows.flatMap((row) => {
+        const count = Math.max(1, Number(row.quantity || 0));
+
+        return Array.from({ length: count }, (_item, index) => ({
+          ...redactSoldProductForAccess(
+            {
+              ...row,
+              id: count > 1 ? `${row.id}-${index + 1}` : String(row.id),
+              quantity: 1
+            },
+            request
+          ),
+          quantity: 1,
+          soldPrice: Number(row.soldPrice || 0),
+          sellerName: row.sellerName || "Noma'lum",
+          ...(canViewAllSoldProducts ? { landingPrice: Number(row.landingPrice || 0) } : {})
+        }));
+      })
     });
   } catch (error) {
     next(error);
@@ -1256,7 +1377,11 @@ app.get("/api/products/match", requireAuth, requireStoreOwner, async (request, r
       return;
     }
 
-    apiData(response, [await fetchProduct(match.productId, currentStoreId(request))].filter(Boolean));
+    apiData(
+      response,
+      [await fetchProduct(match.productId, currentStoreId(request))]
+        .filter(Boolean)
+    );
   } catch (error) {
     next(error);
   }
@@ -1371,7 +1496,7 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
   }
 });
 
-app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, response, next) => {
+app.put("/api/products/:id", requireAuth, requireStoreOwner, requireStoreWriteAccess, async (request, response, next) => {
   const validation = validateProductPayload(request.body);
   if (validation.error) {
     apiMessage(response, validation.error, 400);
@@ -1445,7 +1570,7 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
   }
 });
 
-app.delete("/api/products/:id", requireAuth, requireStoreOwner, async (request, response, next) => {
+app.delete("/api/products/:id", requireAuth, requireStoreOwner, requireStoreWriteAccess, async (request, response, next) => {
   const productId = Number(request.params.id);
   const connection = await pool.getConnection();
 
@@ -1520,6 +1645,7 @@ app.listen(port, host, async () => {
     await testConnection();
     await removeArtNoUniqueIndexes();
     await ensureSoldProductsTable();
+    await ensureInventoryAccessRequestsTable();
     await cleanupStaleTempUploads();
     setInterval(() => {
       cleanupStaleTempUploads().catch((error) => {
