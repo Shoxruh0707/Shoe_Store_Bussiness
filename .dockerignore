@@ -1,0 +1,13 @@
+.git
+.agents
+.codex
+node_modules
+frontend/node_modules
+logs
+tools/ngrok
+.env
+.env.*
+!.env.docker.example
+npm-debug.log*
+frontend/.next
+frontend/out

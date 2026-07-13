@@ -16,6 +16,7 @@ const defaultOwnerPhone = process.env.DEFAULT_OWNER_PHONE || "+998000000001";
 const defaultPasswordHash =
   process.env.DEFAULT_OWNER_PASSWORD_HASH || "$2b$10$0000000000000000000000000000000000000000000000000000";
 const sessionSecret = process.env.SESSION_SECRET || "change-this-session-secret";
+const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE === "true";
 const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN || "";
 const telegramAuthMaxAgeSeconds = Number(process.env.TELEGRAM_AUTH_MAX_AGE_SECONDS || 86400);
 const apiAuthRequired = process.env.API_AUTH_REQUIRED !== "false";
@@ -24,6 +25,12 @@ const corsOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000,http://l
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const backgroundRemovalUrl = cleanServiceUrl(process.env.BACKGROUND_REMOVAL_URL || "");
+const backgroundRemovalRequired = process.env.BACKGROUND_REMOVAL_REQUIRED === "true";
+const configuredBackgroundRemovalTimeoutMs = Number(process.env.BACKGROUND_REMOVAL_TIMEOUT_MS || 120000);
+const backgroundRemovalTimeoutMs = Number.isFinite(configuredBackgroundRemovalTimeoutMs)
+  ? Math.max(1000, configuredBackgroundRemovalTimeoutMs)
+  : 120000;
 
 const SHOE_TYPES = [
   "Basanochka",
@@ -52,6 +59,10 @@ const IMAGE_MIME_EXTENSIONS = {
   "image/webp": ".webp",
   "image/gif": ".gif"
 };
+
+function cleanServiceUrl(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
@@ -169,11 +180,13 @@ function setSessionCookie(response, user) {
     role: user.role,
     issuedAt: Date.now()
   });
-  response.setHeader("Set-Cookie", `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`);
+  const secure = sessionCookieSecure ? "; Secure" : "";
+  response.setHeader("Set-Cookie", `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`);
 }
 
 function clearSessionCookie(response) {
-  response.setHeader("Set-Cookie", "session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+  const secure = sessionCookieSecure ? "; Secure" : "";
+  response.setHeader("Set-Cookie", `session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`);
 }
 
 function parsePositiveNumber(value) {
@@ -287,8 +300,74 @@ function imageBufferFromData(image) {
   return { buffer, extension };
 }
 
+async function removeImageBackground(buffer) {
+  if (!backgroundRemovalUrl) {
+    if (backgroundRemovalRequired) {
+      throw Object.assign(
+        new Error("Rasmga ishlov berish xizmati sozlanmagan."),
+        { statusCode: 503 }
+      );
+    }
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), backgroundRemovalTimeoutMs);
+
+  try {
+    const processorResponse = await fetch(`${backgroundRemovalUrl}/remove`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream"
+      },
+      body: buffer,
+      signal: controller.signal
+    });
+
+    if (!processorResponse.ok) {
+      const detail = (await processorResponse.text()).slice(0, 500);
+      throw new Error(`Background processor returned ${processorResponse.status}: ${detail}`);
+    }
+
+    const processed = Buffer.from(await processorResponse.arrayBuffer());
+    const isPng = processed.length >= 8 && processed.subarray(0, 8).equals(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    );
+    if (!isPng || processed.length > 25 * 1024 * 1024) {
+      throw new Error("Background processor returned an invalid or oversized PNG.");
+    }
+
+    return processed;
+  } catch (error) {
+    const detail = error.name === "AbortError"
+      ? `timed out after ${backgroundRemovalTimeoutMs} ms`
+      : error.message;
+
+    if (backgroundRemovalRequired) {
+      console.error(`Background removal failed: ${detail}`);
+      throw Object.assign(
+        new Error("Rasm fonini olib tashlab bo'lmadi. Keyinroq qayta urinib ko'ring."),
+        { statusCode: 502 }
+      );
+    }
+
+    console.warn(`Background removal skipped: ${detail}`);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function processUploadedImage(image) {
+  const original = imageBufferFromData(image);
+  const processedBuffer = await removeImageBackground(original.buffer);
+  return processedBuffer
+    ? { buffer: processedBuffer, extension: ".png" }
+    : original;
+}
+
 async function saveImageFile(image) {
-  const { buffer, extension } = imageBufferFromData(image);
+  const { buffer, extension } = await processUploadedImage(image);
 
   const fileName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
   const filePath = path.join(UPLOAD_DIR, fileName);
@@ -305,7 +384,7 @@ function tempUploadFilePath(tempId) {
 }
 
 async function saveTempImageFile(image) {
-  const { buffer, extension } = imageBufferFromData(image);
+  const { buffer, extension } = await processUploadedImage(image);
   const tempId = `${Date.now()}-${crypto.randomUUID()}${extension}`;
   const filePath = path.join(TEMP_UPLOAD_DIR, tempId);
   await fs.promises.writeFile(filePath, buffer);
@@ -408,18 +487,20 @@ async function saveProductImages(connection, variantId, images) {
 
 async function removeArtNoUniqueIndexes() {
   const [indexes] = await pool.execute(
-    `SELECT INDEX_NAME AS indexName
-     FROM INFORMATION_SCHEMA.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'products'
-       AND INDEX_NAME <> 'PRIMARY'
-     GROUP BY INDEX_NAME
-     HAVING MAX(NON_UNIQUE) = 0
-        AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) = 'art_no'`
+    `SELECT i.relname AS indexName
+     FROM pg_class t
+     INNER JOIN pg_index ix ON ix.indrelid = t.oid
+     INNER JOIN pg_class i ON i.oid = ix.indexrelid
+     INNER JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+     WHERE t.relname = 'products'
+       AND ix.indisunique = TRUE
+       AND i.relname <> 'products_pkey'
+     GROUP BY i.relname
+     HAVING STRING_AGG(a.attname, ',' ORDER BY a.attnum) = 'art_no'`
   );
 
   for (const index of indexes) {
-    await pool.query(`ALTER TABLE products DROP INDEX \`${index.indexName.replace(/`/g, "``")}\``);
+    await pool.query(`DROP INDEX IF EXISTS "${String(index.indexName).replace(/"/g, "\"\"")}"`);
   }
 }
 
@@ -427,15 +508,15 @@ async function removeArtNoUniqueIndexes() {
 async function ensureSoldProductsTable() {
   await pool.execute(
     `CREATE TABLE IF NOT EXISTS sold_products (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      store_id INT NOT NULL,
-      user_id INT NOT NULL,
-      product_variant_id INT NOT NULL,
-      size ENUM('33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44') NOT NULL,
-      quantity INT NOT NULL DEFAULT 1,
-      sold_price DECIMAL(10,2) NOT NULL,
-      landing_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-      sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+      store_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      product_variant_id INTEGER NOT NULL,
+      size shoe_size NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      sold_price NUMERIC(10,2) NOT NULL,
+      landing_price NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+      sold_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
       CONSTRAINT fk_sold_products_store
         FOREIGN KEY (store_id) REFERENCES store(id)
@@ -460,29 +541,29 @@ async function ensureSoldProductsTable() {
 
       CONSTRAINT chk_sold_products_landing_price
         CHECK (landing_price >= 0)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+    )`
   );
 
   const [landingPriceColumns] = await pool.execute(
     `SELECT 1
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'sold_products'
-       AND COLUMN_NAME = 'landing_price'
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'sold_products'
+       AND column_name = 'landing_price'
      LIMIT 1`
   );
 
   if (!landingPriceColumns.length) {
     await pool.query(
-      "ALTER TABLE sold_products ADD COLUMN landing_price DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER sold_price"
+      "ALTER TABLE sold_products ADD COLUMN landing_price NUMERIC(10,2) NOT NULL DEFAULT 0.00"
     );
   }
 
   const [landingPriceChecks] = await pool.execute(
     `SELECT 1
-     FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS
-     WHERE CONSTRAINT_SCHEMA = DATABASE()
-       AND CONSTRAINT_NAME = 'chk_sold_products_landing_price'
+     FROM information_schema.check_constraints
+     WHERE constraint_schema = 'public'
+       AND constraint_name = 'chk_sold_products_landing_price'
      LIMIT 1`
   );
 
@@ -502,16 +583,16 @@ async function ensureSoldProductsTable() {
   for (const [indexName, columnName] of indexes) {
     const [existing] = await pool.execute(
       `SELECT 1
-       FROM INFORMATION_SCHEMA.STATISTICS
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = 'sold_products'
-         AND INDEX_NAME = ?
+       FROM pg_indexes
+       WHERE schemaname = 'public'
+         AND tablename = 'sold_products'
+         AND indexname = ?
        LIMIT 1`,
       [indexName]
     );
 
     if (!existing.length) {
-      await pool.query(`CREATE INDEX \`${indexName}\` ON sold_products(\`${columnName}\`)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS "${indexName}" ON sold_products("${columnName}")`);
     }
   }
 }
@@ -519,13 +600,13 @@ async function ensureSoldProductsTable() {
 async function ensureInventoryAccessRequestsTable() {
   await pool.execute(
     `CREATE TABLE IF NOT EXISTS inventory_access_requests (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      seller_user_id INT NOT NULL,
-      store_id INT NOT NULL,
-      status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
-      requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      responded_at DATETIME NULL,
-      responded_by_user_id INT NULL,
+      id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+      seller_user_id INTEGER NOT NULL,
+      store_id INTEGER NOT NULL,
+      status access_request_status NOT NULL DEFAULT 'pending',
+      requested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      responded_at TIMESTAMP NULL,
+      responded_by_user_id INTEGER NULL,
 
       CONSTRAINT fk_inventory_access_requests_seller
         FOREIGN KEY (seller_user_id) REFERENCES users(id)
@@ -541,7 +622,7 @@ async function ensureInventoryAccessRequestsTable() {
         FOREIGN KEY (responded_by_user_id) REFERENCES users(id)
         ON UPDATE CASCADE
         ON DELETE SET NULL
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+    )`
   );
 
   const indexes = [
@@ -553,16 +634,16 @@ async function ensureInventoryAccessRequestsTable() {
   for (const [indexName, columnName] of indexes) {
     const [existing] = await pool.execute(
       `SELECT 1
-       FROM INFORMATION_SCHEMA.STATISTICS
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = 'inventory_access_requests'
-         AND INDEX_NAME = ?
+       FROM pg_indexes
+       WHERE schemaname = 'public'
+         AND tablename = 'inventory_access_requests'
+         AND indexname = ?
        LIMIT 1`,
       [indexName]
     );
 
     if (!existing.length) {
-      await pool.query(`CREATE INDEX \`${indexName}\` ON inventory_access_requests(\`${columnName}\`)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS "${indexName}" ON inventory_access_requests("${columnName}")`);
     }
   }
 }
@@ -649,8 +730,9 @@ async function ensureDefaultStore(connection) {
   }
 
   await connection.execute(
-    `INSERT IGNORE INTO store_users (user_id, store_id, role)
-     VALUES (?, ?, 'owner')`,
+    `INSERT INTO store_users (user_id, store_id, role)
+     VALUES (?, ?, 'owner')
+     ON CONFLICT (user_id, store_id) DO NOTHING`,
     [ownerId, defaultStoreId]
   );
 
@@ -667,7 +749,7 @@ async function storeForUser(userId) {
      INNER JOIN store s ON s.id = su.store_id
      WHERE su.user_id = ?
        AND s.is_active = TRUE
-     ORDER BY FIELD(su.role, 'owner', 'manager', 'staff'), s.id
+     ORDER BY CASE su.role WHEN 'owner' THEN 1 WHEN 'manager' THEN 2 WHEN 'staff' THEN 3 ELSE 4 END, s.id
      LIMIT 1`,
     [userId]
   );
@@ -967,7 +1049,7 @@ async function fetchProductLookupByArtNo(artNo, storeId = defaultStoreId) {
        p.art_no AS artNo,
        p.name,
        st.type,
-       (SELECT GROUP_CONCAT(ps.season ORDER BY ps.season SEPARATOR ',')
+       (SELECT STRING_AGG(ps.season::text, ',' ORDER BY ps.season)
         FROM product_seasons ps
         WHERE ps.product_id = p.id) AS seasonValues,
        p.landing_price AS landingPrice,
@@ -1028,7 +1110,7 @@ async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
        p.art_no AS artNo,
        p.name,
        st.type,
-       (SELECT GROUP_CONCAT(ps.season ORDER BY ps.season SEPARATOR ',')
+       (SELECT STRING_AGG(ps.season::text, ',' ORDER BY ps.season)
         FROM product_seasons ps
        WHERE ps.product_id = p.id) AS seasonValues,
        p.landing_price AS landingPrice,
@@ -1305,7 +1387,7 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
        LEFT JOIN users u ON u.id = sp.user_id
        WHERE sp.store_id = ?
          AND sp.sold_at >= ?
-         AND sp.sold_at < DATE_ADD(?, INTERVAL 1 DAY)
+         AND sp.sold_at < (?::date + INTERVAL '1 day')
          ${canViewAllSoldProducts ? "" : "AND sp.user_id = ?"}
        ORDER BY sp.sold_at DESC, sp.id DESC`,
       params

@@ -26,6 +26,27 @@ This starts:
 - Telegram bot: npm run bot
 - ngrok tunnel to frontend port 3001
 
+
+Docker start with PostgreSQL
+From PowerShell in this folder:
+
+Copy-Item .env.docker.example .env.docker
+
+Edit .env.docker and set:
+- DB_PASSWORD
+- SESSION_SECRET
+- TELEGRAM_BOT_TOKEN
+- TELEGRAM_BOT_USERNAME
+- PUBLIC_URL for production or a public HTTPS tunnel
+
+Start backend, frontend, and PostgreSQL:
+
+docker compose up --build
+
+Start the Telegram bot too:
+
+docker compose --profile bot up --build
+
 Logs are saved here:
 - logs\backend.log
 - logs\backend.err.log
@@ -97,4 +118,4 @@ npm.cmd run stack:restart
 
 If the bot starts but the Mini App opens the wrong page, update TELEGRAM_WEBAPP_URL in .env to the current ngrok HTTPS URL ending with /inventory, then restart.
 
-If the app says the database is unavailable, make sure MySQL is running and the DB_* values in .env match your local MySQL setup.
+If the app says the database is unavailable, make sure PostgreSQL is running and the DB_* values in .env or .env.docker match your database setup.
