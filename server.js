@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const { pool, testConnection } = require("./src/db");
 
 const app = express();
@@ -96,6 +97,17 @@ app.use((request, response, next) => {
 
 app.use(express.json({ limit: "25mb" }));
 app.use("/uploads", express.static(UPLOAD_DIR));
+
+const productWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests. Please try again later."
+  }
+});
 
 app.use((request, response, next) => {
   const origin = request.get("Origin");
@@ -1371,7 +1383,7 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
   }
 });
 
-app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, response, next) => {
+app.put("/api/products/:id", requireAuth, requireStoreOwner, productWriteLimiter, async (request, response, next) => {
   const validation = validateProductPayload(request.body);
   if (validation.error) {
     apiMessage(response, validation.error, 400);
@@ -1445,7 +1457,7 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
   }
 });
 
-app.delete("/api/products/:id", requireAuth, requireStoreOwner, async (request, response, next) => {
+app.delete("/api/products/:id", requireAuth, requireStoreOwner, productWriteLimiter, async (request, response, next) => {
   const productId = Number(request.params.id);
   const connection = await pool.getConnection();
 
