@@ -19,11 +19,16 @@ const sessionSecret = process.env.SESSION_SECRET || "change-this-session-secret"
 const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN || "";
 const telegramAuthMaxAgeSeconds = Number(process.env.TELEGRAM_AUTH_MAX_AGE_SECONDS || 86400);
 const apiAuthRequired = process.env.API_AUTH_REQUIRED !== "false";
-const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:3001").replace(/\/$/, "");
-const corsOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const isProduction = process.env.NODE_ENV === "production";
+const domain = cleanDomain(process.env.DOMAIN || "");
+const publicUrl = normalizeUrl(
+  process.env.PUBLIC_URL || process.env.FRONTEND_URL || (domain ? `https://${domain}` : "") || "http://localhost:3001"
+);
+const frontendUrl = publicUrl;
+const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE
+  ? process.env.SESSION_COOKIE_SECURE === "true"
+  : publicUrl.startsWith("https://");
+const corsOrigins = buildCorsOrigins();
 
 const SHOE_TYPES = [
   "Basanochka",
@@ -52,6 +57,52 @@ const IMAGE_MIME_EXTENSIONS = {
   "image/webp": ".webp",
   "image/gif": ".gif"
 };
+
+function cleanDomain(value) {
+  return String(value || "")
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .trim();
+}
+
+function normalizeUrl(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\/$/, "");
+}
+
+function originFromUrl(value) {
+  try {
+    return new URL(value).origin;
+  } catch (_error) {
+    return "";
+  }
+}
+
+function originsFromDomains(value, includeHttp = false) {
+  return String(value || "")
+    .split(",")
+    .map(cleanDomain)
+    .filter(Boolean)
+    .flatMap((hostName) => (includeHttp ? [`https://${hostName}`, `http://${hostName}`] : [`https://${hostName}`]));
+}
+
+function buildCorsOrigins() {
+  const configuredOrigins = String(process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map(normalizeUrl)
+    .filter(Boolean);
+  const defaultOrigins = [
+    originFromUrl(publicUrl),
+    ...originsFromDomains(process.env.DOMAIN, !isProduction),
+    ...originsFromDomains(process.env.ADDITIONAL_DOMAINS, !isProduction)
+  ];
+  const localOrigins = isProduction
+    ? []
+    : ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"];
+
+  return [...new Set([...configuredOrigins, ...defaultOrigins, ...localOrigins].filter(Boolean))];
+}
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
@@ -169,11 +220,13 @@ function setSessionCookie(response, user) {
     role: user.role,
     issuedAt: Date.now()
   });
-  response.setHeader("Set-Cookie", `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`);
+  const secure = sessionCookieSecure ? "; Secure" : "";
+  response.setHeader("Set-Cookie", `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`);
 }
 
 function clearSessionCookie(response) {
-  response.setHeader("Set-Cookie", "session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+  const secure = sessionCookieSecure ? "; Secure" : "";
+  response.setHeader("Set-Cookie", `session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`);
 }
 
 function parsePositiveNumber(value) {

@@ -2,7 +2,7 @@
 	email {$ACME_EMAIL}
 }
 
-{$DOMAIN} {
+{$CADDY_DOMAINS} {
 	encode zstd gzip
 
 	handle /api/* {

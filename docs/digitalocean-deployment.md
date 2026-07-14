@@ -59,6 +59,10 @@ chmod 600 .env
 Set all placeholder values. Important notes:
 
 - `DOMAIN` is only the hostname, without `https://` or a trailing slash.
+- `CADDY_DOMAINS` is optional. Use it when Caddy should serve more than one
+  hostname, for example `ombor.me, www.ombor.me`.
+- To move this same project to another domain later, update DNS, change
+  `DOMAIN` in `.env`, and restart the stack. No code change is needed.
 - `ACME_EMAIL` is used by Caddy for Let's Encrypt.
 - Keep `DB_NAME=shoes_store_db` unless you also edit `shoes_store_database_ddl.sql`.
 - `DB_PASSWORD` is the app database user password.

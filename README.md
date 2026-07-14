@@ -84,6 +84,11 @@ docker compose up -d --build
 
 See `docs/digitalocean-deployment.md` for the full deployment checklist.
 
+To use a different domain, point that domain's DNS to the server and change only
+`DOMAIN` in the production `.env` file. The app derives its public URL, backend
+redirects, CORS origin, Telegram Mini App URL, and Caddy HTTPS certificate from
+that value by default.
+
 ## Full Stack With Logs
 
 To start or restart the backend, frontend, Telegram bot, and ngrok together, run:
@@ -177,6 +182,7 @@ Recommended `.env` values:
 ```env
 PORT=3000
 FRONTEND_URL=http://localhost:3001
+PUBLIC_URL=http://localhost:3001
 
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -194,6 +200,7 @@ TELEGRAM_POLL_TIMEOUT_SECONDS=25
 
 API_AUTH_REQUIRED=true
 CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
+NEXT_ALLOWED_DEV_ORIGINS=
 
 DEFAULT_STORE_ID=1
 DEFAULT_STORE_NAME=Default Store
@@ -206,7 +213,9 @@ Notes:
 
 - `TELEGRAM_BOT_TOKEN` is used to verify Mini App `initData`; never commit it.
 - `TELEGRAM_WEBAPP_URL` must point to the HTTPS `/inventory` URL configured for the bot.
-- `FRONTEND_URL` is where the backend redirects page requests.
+- `PUBLIC_URL`/`FRONTEND_URL` is where the backend redirects page requests.
+- `DOMAIN` in production is the hostname Caddy serves with HTTPS. Change it to
+  deploy the same project under another domain without code changes.
 - `API_AUTH_REQUIRED=false` is useful only for local frontend testing without Telegram auth.
 - `SESSION_SECRET` signs the internal app session cookie created after Telegram verification.
 - `DEFAULT_STORE_ID` is used by the legacy/default product flow.
@@ -243,7 +252,7 @@ Expected tables include:
 
 ## Backend Routes
 
-Page routes are served by the Next.js frontend on port `3001`. The Express backend redirects `/` and `/inventory` to `FRONTEND_URL`.
+Page routes are served by the Next.js frontend on port `3001`. The Express backend redirects `/` and `/inventory` to `PUBLIC_URL`/`FRONTEND_URL`.
 
 Useful API endpoints:
 

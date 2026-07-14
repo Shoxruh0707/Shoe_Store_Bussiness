@@ -49,9 +49,9 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
       TELEGRAM_AUTH_MAX_AGE_SECONDS: ${TELEGRAM_AUTH_MAX_AGE_SECONDS:-86400}
-      FRONTEND_URL: https://${DOMAIN:?Set DOMAIN in .env}
-      PUBLIC_URL: https://${DOMAIN:?Set DOMAIN in .env}
-      CORS_ORIGINS: https://${DOMAIN:?Set DOMAIN in .env}
+      FRONTEND_URL: ${PUBLIC_URL:-https://${DOMAIN:?Set DOMAIN in .env}}
+      PUBLIC_URL: ${PUBLIC_URL:-https://${DOMAIN:?Set DOMAIN in .env}}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://${DOMAIN:?Set DOMAIN in .env}}
       SESSION_COOKIE_SECURE: "true"
       DEFAULT_STORE_ID: ${DEFAULT_STORE_ID:-1}
       DEFAULT_STORE_NAME: ${DEFAULT_STORE_NAME:-Default Store}
@@ -117,7 +117,7 @@ services:
       DB_NAME: ${DB_NAME:-shoes_store_db}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
-      TELEGRAM_WEBAPP_URL: https://${DOMAIN:?Set DOMAIN in .env}/inventory
+      TELEGRAM_WEBAPP_URL: ${TELEGRAM_WEBAPP_URL:-https://${DOMAIN:?Set DOMAIN in .env}/inventory}
       TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
       DEFAULT_OWNER_PASSWORD_HASH: ${DEFAULT_OWNER_PASSWORD_HASH:-}
     depends_on:
@@ -136,6 +136,7 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      CADDY_DOMAINS: ${CADDY_DOMAINS:-${DOMAIN:?Set DOMAIN in .env}}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
     ports:
       - "80:80"
