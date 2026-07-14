@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Product } from '@/lib/api';
 import { X, ChevronLeft, ChevronRight, Edit, Trash2 } from 'lucide-react';
-import { STOCK_STATUS, LOW_STOCK_THRESHOLD, seasonLabel } from '@/lib/constants';
+import { STOCK_STATUS, LOW_STOCK_THRESHOLD } from '@/lib/constants';
 
 interface ProductDrawerProps {
   product: Product | null;
@@ -11,15 +11,13 @@ interface ProductDrawerProps {
   onClose: () => void;
   onEdit: (product: Product) => void;
   onDelete: (product: Product) => void;
-  canManageInventory?: boolean;
-  canViewSensitiveFields?: boolean;
 }
 
 function getStockStatus(inventory: { size: number; quantity: number }[]) {
   const total = inventory.reduce((sum, item) => sum + item.quantity, 0);
-  if (total === 0) return { status: STOCK_STATUS.OUT_OF_STOCK, label: 'Tugagan', color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' };
-  if (total < LOW_STOCK_THRESHOLD) return { status: STOCK_STATUS.LOW_STOCK, label: 'Kam qolgan', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200' };
-  return { status: STOCK_STATUS.IN_STOCK, label: 'Mavjud', color: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' };
+  if (total === 0) return { status: STOCK_STATUS.OUT_OF_STOCK, label: 'Out of Stock', color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' };
+  if (total < LOW_STOCK_THRESHOLD) return { status: STOCK_STATUS.LOW_STOCK, label: 'Low Stock', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200' };
+  return { status: STOCK_STATUS.IN_STOCK, label: 'In Stock', color: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' };
 }
 
 function getTotalStock(inventory: { size: number; quantity: number }[]) {
@@ -32,8 +30,6 @@ export function ProductDrawer({
   onClose,
   onEdit,
   onDelete,
-  canManageInventory = true,
-  canViewSensitiveFields = true,
 }: ProductDrawerProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -66,7 +62,7 @@ export function ProductDrawer({
           {/* Header */}
           <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-800">
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-              Mahsulot tafsilotlari
+              Product Details
             </h2>
             <button
               onClick={onClose}
@@ -82,7 +78,7 @@ export function ProductDrawer({
             {images.length > 0 && (
               <div className="space-y-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                  Rasmlar
+                  Images
                 </h3>
                 <div className="relative overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800">
                   {currentImage ? (
@@ -93,7 +89,7 @@ export function ProductDrawer({
                     />
                   ) : (
                     <div className="h-64 flex items-center justify-center text-gray-400">
-                      Rasm yo'q
+                      No image
                     </div>
                   )}
                 </div>
@@ -136,7 +132,7 @@ export function ProductDrawer({
                       >
                         <img
                           src={img.path || ''}
-                          alt={`Kichik rasm ${idx + 1}`}
+                          alt={`Thumbnail ${idx + 1}`}
                           className="h-full w-full object-cover"
                         />
                       </button>
@@ -149,24 +145,24 @@ export function ProductDrawer({
             {/* Product Information */}
             <div className="space-y-3">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                Ma'lumot
+                Information
               </h3>
               <div className="space-y-2">
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Art raqami</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Art Number</p>
                   <p className="font-bold text-lg text-gray-900 dark:text-gray-100">
                     {product.artNo}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Mahsulot nomi</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Product Name</p>
                   <p className="font-semibold text-gray-900 dark:text-gray-100">
                     {product.name}
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">Turi</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Type</p>
                     <p className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">
                       {product.type}
                     </p>
@@ -180,7 +176,7 @@ export function ProductDrawer({
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">Rangi</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Colour</p>
                     <div className="flex items-center gap-2">
                       <div
                         className="h-5 w-5 rounded border border-gray-300 dark:border-gray-600"
@@ -192,9 +188,9 @@ export function ProductDrawer({
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">Mavsumlar</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Seasons</p>
                     <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {product.seasons?.map(seasonLabel).join(', ') || 'Yo\'q'}
+                      {product.seasons?.join(', ') || 'N/A'}
                     </p>
                   </div>
                 </div>
@@ -204,23 +200,21 @@ export function ProductDrawer({
             {/* Pricing */}
             <div className="space-y-3">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                Narxlar
+                Pricing
               </h3>
-              <div className={`grid gap-4 rounded-lg bg-gray-50 p-4 dark:bg-gray-800 ${canViewSensitiveFields ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              <div className="grid grid-cols-2 gap-4 rounded-lg bg-gray-50 p-4 dark:bg-gray-800">
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Sotuv narxi</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Selling Price</p>
                   <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                     {product.price.toLocaleString()}
                   </p>
                 </div>
-                {canViewSensitiveFields && product.landingPrice !== undefined && (
-                  <div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">Kelish narxi</p>
-                    <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                      {product.landingPrice.toLocaleString()}
-                    </p>
-                  </div>
-                )}
+                <div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Landing Price</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                    {product.landingPrice.toLocaleString()}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -228,7 +222,7 @@ export function ProductDrawer({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                  Ombor
+                  Inventory
                 </h3>
                 <span className={`inline-block rounded px-2.5 py-0.5 text-xs font-medium ${stockInfo.color}`}>
                   {stockInfo.label}
@@ -237,7 +231,7 @@ export function ProductDrawer({
 
               {/* Total Stock Summary */}
               <div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-950">
-                <p className="text-xs text-blue-600 dark:text-blue-400">Jami qoldiq</p>
+                <p className="text-xs text-blue-600 dark:text-blue-400">Total Stock</p>
                 <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
                   {totalStock}
                 </p>
@@ -248,18 +242,18 @@ export function ProductDrawer({
                 <table className="w-full text-sm">
                   <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
                     <tr>
-                      <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">O'lcham</th>
-                      <th className="px-3 py-2 text-center font-semibold text-gray-900 dark:text-gray-100">Soni</th>
-                      <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Holat</th>
+                      <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Size</th>
+                      <th className="px-3 py-2 text-center font-semibold text-gray-900 dark:text-gray-100">Qty</th>
+                      <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedInventory.map((item) => {
                       const itemStatus = item.quantity === 0
-                        ? 'Tugagan'
+                        ? 'Out of Stock'
                         : item.quantity < LOW_STOCK_THRESHOLD
-                        ? 'Kam qolgan'
-                        : 'Mavjud';
+                        ? 'Low Stock'
+                        : 'In Stock';
                       const itemColor = item.quantity === 0
                         ? 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300'
                         : item.quantity < LOW_STOCK_THRESHOLD
@@ -289,7 +283,6 @@ export function ProductDrawer({
           </div>
 
           {/* Footer Actions */}
-          {canManageInventory && (
           <div className="border-t border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-800">
             <div className="flex gap-2">
               <button
@@ -300,18 +293,17 @@ export function ProductDrawer({
                 className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
               >
                 <Edit className="inline mr-1 h-4 w-4" />
-                Tahrirlash
+                Edit
               </button>
               <button
                 onClick={() => setShowDeleteConfirm(true)}
                 className="flex-1 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-100 dark:border-red-700 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-900"
               >
                 <Trash2 className="inline mr-1 h-4 w-4" />
-                O'chirish
+                Delete
               </button>
             </div>
           </div>
-          )}
         </div>
       </div>
 
@@ -320,17 +312,17 @@ export function ProductDrawer({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70">
           <div className="mx-4 rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
             <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-              Mahsulot o'chirilsinmi?
+              Delete Product?
             </h3>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              <span className="font-semibold">{product.name}</span> mahsulotini o'chirishni xohlaysizmi? Bu amalni ortga qaytarib bo'lmaydi.
+              Are you sure you want to delete <span className="font-semibold">{product.name}</span>? This action cannot be undone.
             </p>
             <div className="mt-4 flex gap-2">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
                 className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
               >
-                Bekor qilish
+                Cancel
               </button>
               <button
                 onClick={() => {
@@ -340,7 +332,7 @@ export function ProductDrawer({
                 }}
                 className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700"
               >
-                O'chirish
+                Delete
               </button>
             </div>
           </div>
