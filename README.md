@@ -66,6 +66,24 @@ Run the redesigned frontend separately:
 npm run frontend:dev
 ```
 
+## Docker Deployment
+
+The project includes a production Docker setup for a DigitalOcean Droplet:
+
+- `Dockerfile` builds the Express backend, Telegram bot, and Next.js frontend.
+- `docker-compose.yml` runs MySQL, backend, frontend, bot, and Caddy HTTPS proxy.
+- `.env.production.example` contains the required production environment values.
+
+On the Droplet:
+
+```bash
+cp .env.production.example .env
+nano .env
+docker compose up -d --build
+```
+
+See `docs/digitalocean-deployment.md` for the full deployment checklist.
+
 ## Full Stack With Logs
 
 To start or restart the backend, frontend, Telegram bot, and ngrok together, run:
