@@ -1383,7 +1383,7 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
   }
 });
 
-app.put("/api/products/:id", requireAuth, requireStoreOwner, productWriteLimiter, async (request, response, next) => {
+app.put("/api/products/:id", productWriteLimiter, requireAuth, requireStoreOwner, async (request, response, next) => {
   const validation = validateProductPayload(request.body);
   if (validation.error) {
     apiMessage(response, validation.error, 400);
@@ -1457,7 +1457,7 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, productWriteLimiter
   }
 });
 
-app.delete("/api/products/:id", requireAuth, requireStoreOwner, productWriteLimiter, async (request, response, next) => {
+app.delete("/api/products/:id", productWriteLimiter, requireAuth, requireStoreOwner, async (request, response, next) => {
   const productId = Number(request.params.id);
   const connection = await pool.getConnection();
 
