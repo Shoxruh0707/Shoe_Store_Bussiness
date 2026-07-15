@@ -1,8 +1,8 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
-import { CheckCircle, X, XCircle } from 'lucide-react';
-import { Metadata, SoldProductPayload } from '@/lib/api';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Package, Search, X, XCircle } from 'lucide-react';
+import { Metadata, Product, SoldProductPayload } from '@/lib/api';
 import { SHOE_SIZES } from '@/lib/constants';
 
 interface SoldProductModalProps {
@@ -10,6 +10,7 @@ interface SoldProductModalProps {
   onClose: () => void;
   onSubmit: (payload: SoldProductPayload) => Promise<string>;
   metadata: Metadata;
+  products: Product[];
   isSubmitting?: boolean;
 }
 
@@ -37,26 +38,90 @@ export function SoldProductModal({
   onClose,
   onSubmit,
   metadata,
+  products,
   isSubmitting = false,
 }: SoldProductModalProps) {
   const [formData, setFormData] = useState<SoldProductFormState>(initialFormState);
+  const [productSearch, setProductSearch] = useState('');
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
       setFormData(initialFormState);
+      setProductSearch('');
+      setSelectedVariantId(null);
       setError(null);
-      setSuccess(null);
     }
   }, [isOpen]);
+
+  const stockProducts = useMemo(
+    () => products.filter((product) => (product.inventory || []).some((item) => item.quantity > 0)),
+    [products]
+  );
+
+  const filteredStockProducts = useMemo(() => {
+    const tokens = productSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = tokens.length
+      ? stockProducts.filter((product) => {
+          const sizes = (product.inventory || [])
+            .filter((item) => item.quantity > 0)
+            .map((item) => `${item.size} ${item.size}x${item.quantity}`)
+            .join(' ');
+          const text = [
+            product.artNo,
+            product.name,
+            product.colour,
+            product.material,
+            product.type,
+            product.price,
+            sizes,
+          ]
+            .join(' ')
+            .toLowerCase();
+          return tokens.every((token) => text.includes(token));
+        })
+      : stockProducts;
+
+    return matches.slice(0, 8);
+  }, [productSearch, stockProducts]);
+
+  const selectedProduct = useMemo(
+    () => stockProducts.find((product) => product.variantId === selectedVariantId) || null,
+    [selectedVariantId, stockProducts]
+  );
+
+  const availableSizes = selectedProduct
+    ? selectedProduct.inventory.filter((item) => item.quantity > 0).sort((a, b) => a.size - b.size)
+    : [];
 
   if (!isOpen) return null;
 
   const updateField = (field: keyof SoldProductFormState, value: string) => {
     setFormData((current) => ({ ...current, [field]: value }));
+    if (field === 'artNo' || field === 'colourName' || field === 'materialType') {
+      setSelectedVariantId(null);
+    }
     setError(null);
-    setSuccess(null);
+  };
+
+  const selectProduct = (product: Product) => {
+    const firstAvailableSize = (product.inventory || [])
+      .filter((item) => item.quantity > 0)
+      .sort((a, b) => a.size - b.size)[0];
+
+    setSelectedVariantId(product.variantId || null);
+    setProductSearch(`${product.artNo} ${product.colour} ${product.material}`);
+    setFormData((current) => ({
+      ...current,
+      artNo: product.artNo,
+      colourName: product.colour,
+      materialType: product.material,
+      size: firstAvailableSize ? String(firstAvailableSize.size) : current.size,
+      soldPrice: current.soldPrice || String(product.price || ''),
+      quantity: current.quantity || '1',
+    }));
+    setError(null);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -87,7 +152,7 @@ export function SoldProductModal({
     }
 
     try {
-      const message = await onSubmit({
+      await onSubmit({
         art_no: formData.artNo.trim(),
         colour_name: formData.colourName.trim(),
         material_type: formData.materialType.trim(),
@@ -96,8 +161,10 @@ export function SoldProductModal({
         quantity,
       });
 
-      setSuccess(message);
       setFormData(initialFormState);
+      setProductSearch('');
+      setSelectedVariantId(null);
+      onClose();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Failed to mark product as sold.');
     }
@@ -107,7 +174,7 @@ export function SoldProductModal({
     <>
       <div className="fixed inset-0 z-40 bg-black/50 dark:bg-black/70" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-900">
+        <div className="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-900">
           <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-800">
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Sold Product</h2>
             <button
@@ -121,20 +188,84 @@ export function SoldProductModal({
           </div>
 
           <form onSubmit={handleSubmit}>
-            <div className="space-y-4 p-6">
-              {success && (
-                <div className="flex items-start gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-950 dark:text-green-200">
-                  <CheckCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                  <span>{success}</span>
-                </div>
-              )}
-
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto p-6">
               {error && (
                 <div className="flex items-start gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-200">
                   <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
                   <span>{error}</span>
                 </div>
               )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+                  Find product from stock
+                </label>
+                <div className="relative mt-1">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={productSearch}
+                    onChange={(event) => {
+                      setProductSearch(event.target.value);
+                      setSelectedVariantId(null);
+                      setError(null);
+                    }}
+                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
+                    placeholder="Search art no, colour, material, size..."
+                  />
+                </div>
+
+                <div className="mt-2 max-h-44 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-gray-800">
+                  {filteredStockProducts.length > 0 ? (
+                    filteredStockProducts.map((product) => {
+                      const sizes = (product.inventory || []).filter((item) => item.quantity > 0);
+                      const isSelected = selectedVariantId === product.variantId;
+
+                      return (
+                        <button
+                          key={product.variantId ? `variant-${product.variantId}` : `product-${product.id}`}
+                          type="button"
+                          onClick={() => selectProduct(product)}
+                          className={`w-full rounded-lg border p-3 text-left transition ${
+                            isSelected
+                              ? 'border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950'
+                              : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/30'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
+                              <Package className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <span className="font-bold text-gray-900 dark:text-gray-100">{product.artNo}</span>
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  {product.colour} / {product.material}
+                                </span>
+                              </div>
+                              <p className="truncate text-xs text-gray-600 dark:text-gray-400">{product.name}</p>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {sizes.map((item) => (
+                                  <span
+                                    key={item.size}
+                                    className="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[11px] font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                                  >
+                                    {item.size}x{item.quantity}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="py-3 text-center text-xs text-gray-500 dark:text-gray-400">
+                      No matching products in stock
+                    </p>
+                  )}
+                </div>
+              </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -200,12 +331,17 @@ export function SoldProductModal({
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
                   >
                     <option value="">Select</option>
-                    {SHOE_SIZES.map((size) => (
+                    {(availableSizes.length > 0 ? availableSizes.map((item) => item.size) : SHOE_SIZES).map((size) => (
                       <option key={size} value={String(size)}>
                         {size}
                       </option>
                     ))}
                   </select>
+                  {selectedProduct && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Available: {availableSizes.map((item) => `${item.size}x${item.quantity}`).join(', ')}
+                    </p>
+                  )}
                 </div>
 
                 <div>

@@ -24,6 +24,7 @@ function money(value: number) {
 export default function AnalyticsPage() {
   const [selectedDate, setSelectedDate] = useState(todayForInput);
   const [items, setItems] = useState<SoldProductAnalyticsItem[]>([]);
+  const [canViewLandingPrice, setCanViewLandingPrice] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +34,7 @@ export default function AnalyticsPage() {
         (summary, item) => ({
           quantity: summary.quantity + item.quantity,
           revenue: summary.revenue + item.soldPrice * item.quantity,
-          landing: summary.landing + item.landingPrice * item.quantity,
+          landing: summary.landing + Number(item.landingPrice || 0) * item.quantity,
         }),
         { quantity: 0, revenue: 0, landing: 0 }
       ),
@@ -46,6 +47,7 @@ export default function AnalyticsPage() {
       setError(null);
       const result = await api.getSoldProducts(date);
       setItems(result.items);
+      setCanViewLandingPrice(Boolean(result.viewer?.canViewLandingPrice));
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to load sold products.');
     } finally {
@@ -108,20 +110,22 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        <div className="mb-6 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sold quantity</p>
-            <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{totals.quantity}</p>
+        {canViewLandingPrice && (
+          <div className="mb-6 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sold quantity</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{totals.quantity}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sold total</p>
+              <p className="mt-1 text-2xl font-bold text-green-700 dark:text-green-300">{money(totals.revenue)}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Landing total</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{money(totals.landing)}</p>
+            </div>
           </div>
-          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sold total</p>
-            <p className="mt-1 text-2xl font-bold text-green-700 dark:text-green-300">{money(totals.revenue)}</p>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Landing total</p>
-            <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{money(totals.landing)}</p>
-          </div>
-        </div>
+        )}
 
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
@@ -153,10 +157,16 @@ export default function AnalyticsPage() {
                     <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Image</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Art No</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Colour</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Material</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Type</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Size</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Qty</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sold Price</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Landing Price</th>
+                    {canViewLandingPrice && (
+                      <>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Landing Price</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sold By</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -173,10 +183,16 @@ export default function AnalyticsPage() {
                       </td>
                       <td className="px-4 py-3 font-bold text-gray-900 dark:text-gray-100">{item.artNo}</td>
                       <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.colour}</td>
+                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.material}</td>
+                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.type}</td>
                       <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.size}</td>
-                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.quantity}</td>
                       <td className="px-4 py-3 font-semibold text-green-700 dark:text-green-300">{money(item.soldPrice)}</td>
-                      <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{money(item.landingPrice)}</td>
+                      {canViewLandingPrice && (
+                        <>
+                          <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{money(item.landingPrice || 0)}</td>
+                          <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.soldBy || 'N/A'}</td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>

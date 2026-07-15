@@ -72,6 +72,17 @@ function accountTypeKeyboard() {
   };
 }
 
+function sellerRequestKeyboard(requestId) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Approve", callback_data: `seller_request:approve:${requestId}` },
+        { text: "Reject", callback_data: `seller_request:reject:${requestId}` }
+      ]
+    ]
+  };
+}
+
 async function sendMessage(chatId, text, replyMarkup) {
   return telegram("sendMessage", {
     chat_id: chatId,
@@ -80,10 +91,87 @@ async function sendMessage(chatId, text, replyMarkup) {
   });
 }
 
+async function ensureSellerStoreRequestsTable() {
+  await pool.execute(
+    `CREATE TABLE IF NOT EXISTS seller_store_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      seller_user_id INT NOT NULL,
+      store_id INT NOT NULL,
+      status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+      requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      resolved_at DATETIME NULL,
+      resolved_by_user_id INT NULL,
+
+      CONSTRAINT fk_seller_store_requests_seller
+        FOREIGN KEY (seller_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+      CONSTRAINT fk_seller_store_requests_store
+        FOREIGN KEY (store_id) REFERENCES store(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+      CONSTRAINT fk_seller_store_requests_resolver
+        FOREIGN KEY (resolved_by_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+  );
+
+  const indexes = [
+    ["idx_seller_store_requests_seller_user_id", "seller_user_id"],
+    ["idx_seller_store_requests_store_id", "store_id"],
+    ["idx_seller_store_requests_status", "status"]
+  ];
+
+  for (const [indexName, columnName] of indexes) {
+    const [existing] = await pool.execute(
+      `SELECT 1
+       FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'seller_store_requests'
+         AND INDEX_NAME = ?
+       LIMIT 1`,
+      [indexName]
+    );
+
+    if (!existing.length) {
+      await pool.query(`CREATE INDEX \`${indexName}\` ON seller_store_requests(\`${columnName}\`)`);
+    }
+  }
+}
+
 async function answerCallbackQuery(callbackQueryId) {
   return telegram("answerCallbackQuery", {
     callback_query_id: callbackQueryId
   });
+}
+
+async function findStoreByName(storeName) {
+  const [stores] = await pool.execute(
+    `SELECT id, store_name AS storeName
+     FROM store
+     WHERE LOWER(store_name) = LOWER(?)
+       AND is_active = TRUE
+     ORDER BY id
+     LIMIT 1`,
+    [storeName]
+  );
+  return stores[0] || null;
+}
+
+async function ownersForStore(storeId) {
+  const [owners] = await pool.execute(
+    `SELECT u.id, u.telegram_id AS telegramId, u.fname, u.lname
+     FROM store_users su
+     INNER JOIN users u ON u.id = su.user_id
+     WHERE su.store_id = ?
+       AND su.role = 'owner'
+       AND u.telegram_id IS NOT NULL`,
+    [storeId]
+  );
+  return owners;
 }
 
 async function findUserByTelegramId(telegramId) {
@@ -215,11 +303,197 @@ async function createTelegramUser(profile, data) {
   }
 }
 
+async function createSellerStoreRequest(userId, storeId) {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [memberships] = await connection.execute(
+      "SELECT id FROM store_users WHERE user_id = ? AND store_id = ? LIMIT 1",
+      [userId, storeId]
+    );
+    if (memberships.length) {
+      await connection.commit();
+      return { status: "already_member" };
+    }
+
+    const [pending] = await connection.execute(
+      `SELECT id
+       FROM seller_store_requests
+       WHERE seller_user_id = ?
+         AND store_id = ?
+         AND status = 'pending'
+       ORDER BY id DESC
+       LIMIT 1`,
+      [userId, storeId]
+    );
+    if (pending.length) {
+      await connection.commit();
+      return { status: "pending", requestId: pending[0].id };
+    }
+
+    const [insert] = await connection.execute(
+      `INSERT INTO seller_store_requests (seller_user_id, store_id, status)
+       VALUES (?, ?, 'pending')`,
+      [userId, storeId]
+    );
+
+    await connection.commit();
+    return { status: "created", requestId: insert.insertId };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+async function notifyStoreOwnersAboutSellerRequest(requestId, sellerUserId, store) {
+  const [sellers] = await pool.execute(
+    "SELECT fname, lname, phone_number AS phoneNumber FROM users WHERE id = ? LIMIT 1",
+    [sellerUserId]
+  );
+  const seller = sellers[0];
+  const owners = await ownersForStore(store.id);
+
+  for (const owner of owners) {
+    await sendMessage(
+      owner.telegramId,
+      `Seller access request\n\nStore: ${store.storeName}\nSeller: ${seller?.fname || ""} ${seller?.lname || ""}\nPhone: ${seller?.phoneNumber || "N/A"}`,
+      sellerRequestKeyboard(requestId)
+    );
+  }
+
+  return owners.length;
+}
+
+async function submitSellerStoreRequest(chatId, userId, storeName) {
+  const store = await findStoreByName(storeName);
+  if (!store) {
+    await sendMessage(chatId, `No active store named "${storeName}" was found. Ask the owner for the exact store name, then send /start again.`);
+    return;
+  }
+
+  const request = await createSellerStoreRequest(userId, store.id);
+  if (request.status === "already_member") {
+    await sendMessage(chatId, "You can now open the inventory dashboard.", webAppKeyboard());
+    return;
+  }
+
+  const ownerCount = await notifyStoreOwnersAboutSellerRequest(request.requestId, userId, store);
+  if (ownerCount > 0) {
+    await sendMessage(chatId, `Your request was sent to the owner of ${store.storeName}. You can open inventory after approval.`);
+    return;
+  }
+
+  await sendMessage(chatId, `Your request was saved for ${store.storeName}, but no Telegram owner was found to notify. Ask the owner to approve it.`);
+}
+
+async function handleSellerRequestDecision(chatId, from, action, requestId) {
+  const owner = await findUserByTelegramId(from.id);
+  if (!owner?.id) {
+    await sendMessage(chatId, "Owner account was not found. Please send /start.");
+    return;
+  }
+
+  const connection = await pool.getConnection();
+  let sellerTelegramId = null;
+  let storeName = "";
+  let sellerName = "";
+
+  try {
+    await connection.beginTransaction();
+
+    const [[request]] = await connection.execute(
+      `SELECT
+         ssr.id,
+         ssr.seller_user_id AS sellerUserId,
+         ssr.store_id AS storeId,
+         ssr.status,
+         s.store_name AS storeName,
+         u.telegram_id AS sellerTelegramId,
+         CONCAT(u.fname, ' ', u.lname) AS sellerName
+       FROM seller_store_requests ssr
+       INNER JOIN store s ON s.id = ssr.store_id
+       INNER JOIN users u ON u.id = ssr.seller_user_id
+       INNER JOIN store_users su ON su.store_id = ssr.store_id
+       WHERE ssr.id = ?
+         AND su.user_id = ?
+         AND su.role = 'owner'
+       LIMIT 1
+       FOR UPDATE`,
+      [requestId, owner.id]
+    );
+
+    if (!request) {
+      await connection.rollback();
+      await sendMessage(chatId, "Request not found or you are not the owner of this store.");
+      return;
+    }
+
+    if (request.status !== "pending") {
+      await connection.rollback();
+      await sendMessage(chatId, `This request is already ${request.status}.`);
+      return;
+    }
+
+    sellerTelegramId = request.sellerTelegramId;
+    storeName = request.storeName;
+    sellerName = request.sellerName;
+
+    if (action === "approve") {
+      await connection.execute(
+        `INSERT IGNORE INTO store_users (user_id, store_id, role)
+         VALUES (?, ?, 'staff')`,
+        [request.sellerUserId, request.storeId]
+      );
+    }
+
+    await connection.execute(
+      `UPDATE seller_store_requests
+       SET status = ?, resolved_at = NOW(), resolved_by_user_id = ?
+       WHERE id = ?`,
+      [action === "approve" ? "approved" : "rejected", owner.id, requestId]
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+
+  await sendMessage(chatId, `${sellerName} was ${action === "approve" ? "approved for" : "rejected from"} ${storeName}.`);
+  if (sellerTelegramId) {
+    await sendMessage(
+      sellerTelegramId,
+      action === "approve"
+        ? `Your request to join ${storeName} was approved. You can now open the inventory dashboard.`
+        : `Your request to join ${storeName} was rejected.`
+      ,
+      action === "approve" ? webAppKeyboard() : undefined
+    );
+  }
+}
+
 async function showStart(chatId, from) {
   const profile = profileFromTelegram(from);
   const user = await findUserByTelegramId(profile.telegramId);
 
   if (user) {
+    if (user.role === "seller" && !user.storeName) {
+      sessions.set(chatId, {
+        step: "existing_seller_store_name",
+        profile,
+        existingUserId: user.id,
+        data: {}
+      });
+      await sendMessage(chatId, "Your seller account is not connected to a store yet. Please send the exact store name.");
+      return;
+    }
+
     await sendMessage(chatId, "Welcome back.", webAppKeyboard([
       [{ text: "👤 Profile", callback_data: "profile" }],
       [{ text: "❓ Help", callback_data: "help" }]
@@ -293,7 +567,7 @@ async function handleRegistrationText(chatId, text) {
     return true;
   }
 
-  if (session.step === "store_name") {
+  if (session.step === "owner_store_name" || session.step === "seller_store_name") {
     const storeName = cleanText(text);
     if (!storeName || storeName.length > 50) {
       await sendMessage(chatId, "Store name must be 1-50 characters.");
@@ -304,13 +578,31 @@ async function handleRegistrationText(chatId, text) {
     return true;
   }
 
+  if (session.step === "existing_seller_store_name") {
+    const storeName = cleanText(text);
+    if (!storeName || storeName.length > 50) {
+      await sendMessage(chatId, "Store name must be 1-50 characters.");
+      return true;
+    }
+
+    sessions.delete(chatId);
+    await submitSellerStoreRequest(chatId, session.existingUserId, storeName);
+    return true;
+  }
+
   return true;
 }
 
 async function finishRegistration(chatId, session) {
-  await createTelegramUser(session.profile, session.data);
+  const result = await createTelegramUser(session.profile, session.data);
   sessions.delete(chatId);
-  await sendMessage(chatId, "Account created. You can now open the inventory dashboard.", webAppKeyboard());
+
+  if (session.data.storeRole === "owner") {
+    await sendMessage(chatId, "Account created. You can now open the inventory dashboard.", webAppKeyboard());
+    return;
+  }
+
+  await submitSellerStoreRequest(chatId, result.userId, session.data.storeName);
 }
 
 async function handleCallback(callbackQuery) {
@@ -334,6 +626,18 @@ async function handleCallback(callbackQuery) {
     return;
   }
 
+  if (data.startsWith("seller_request:")) {
+    const [, action, requestIdText] = data.split(":");
+    const requestId = Number(requestIdText);
+    if (!["approve", "reject"].includes(action) || !Number.isInteger(requestId)) {
+      await sendMessage(chatId, "This seller request action is invalid.");
+      return;
+    }
+
+    await handleSellerRequestDecision(chatId, callbackQuery.from, action, requestId);
+    return;
+  }
+
   if (!data.startsWith("account:")) return;
 
   const session = sessions.get(chatId);
@@ -351,13 +655,15 @@ async function handleCallback(callbackQuery) {
   session.data.userRole = "seller";
   session.data.storeRole = accountType === "store_owner" ? "owner" : null;
   if (accountType === "store_owner") {
-    session.step = "store_name";
+    session.step = "owner_store_name";
     sessions.set(chatId, session);
     await sendMessage(chatId, "Please send your store name.");
     return;
   }
 
-  await finishRegistration(chatId, session);
+  session.step = "seller_store_name";
+  sessions.set(chatId, session);
+  await sendMessage(chatId, "Which store do you sell for? Please send the exact store name.");
 }
 
 async function handleUpdate(update) {
@@ -389,6 +695,7 @@ async function handleUpdate(update) {
 
 async function startBot() {
   await testConnection();
+  await ensureSellerStoreRequestsTable();
   let offset = 0;
   console.log("Telegram inventory bot is running.");
 

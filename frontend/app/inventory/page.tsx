@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { Product } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import { api, AuthSession, Product } from '@/lib/api';
 import { useProducts } from '@/hooks/useProducts';
 import { useSearch } from '@/hooks/useSearch';
 import { ProductTable } from '@/components/inventory/ProductTable';
@@ -33,6 +33,17 @@ export default function InventoryPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saleMessage, setSaleMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const canManageInventory =
+    authSession?.user.role === 'admin' || ['owner', 'manager'].includes(authSession?.store?.storeRole || '');
+
+  useEffect(() => {
+    api.getAuthSession()
+      .then(setAuthSession)
+      .catch((authError) => {
+        console.error('[v0] Failed to load auth session:', authError);
+      });
+  }, []);
 
   const handleViewProduct = (product: Product) => {
     setSelectedProduct(product);
@@ -144,16 +155,18 @@ export default function InventoryPage() {
                 Sold Product
               </button>
               {/* New sold-product feature code ends. */}
-              <button
-                onClick={() => {
-                  setEditingProduct(null);
-                  setIsAddModalOpen(true);
-                }}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
-              >
-                <Plus className="h-4 w-4" />
-                Add Product
-              </button>
+              {canManageInventory && (
+                <button
+                  onClick={() => {
+                    setEditingProduct(null);
+                    setIsAddModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Product
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -205,6 +218,8 @@ export default function InventoryPage() {
         }}
         onEdit={handleEditProduct}
         onDelete={handleDeleteProduct}
+        canManageInventory={canManageInventory}
+        canViewLandingPrice={canManageInventory}
       />
 
       {/* Add/Edit Modal */}
@@ -226,6 +241,7 @@ export default function InventoryPage() {
         onClose={() => setIsSoldModalOpen(false)}
         onSubmit={handleSoldProduct}
         metadata={metadata}
+        products={products}
         isSubmitting={isSubmitting}
       />
       {/* New sold-product feature code ends. */}

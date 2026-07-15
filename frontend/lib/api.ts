@@ -18,6 +18,12 @@ export interface InventoryItem {
   quantity: number;
 }
 
+export interface BoxStockItem {
+  id: number;
+  sizeRange: string;
+  quantity: number;
+}
+
 export interface ProductImage {
   name?: string;
   path?: string;
@@ -38,8 +44,10 @@ export interface Product {
   colour: string;
   material: string;
   price: number;
-  landingPrice: number;
+  landingPrice: number | null;
   inventory: InventoryItem[];
+  boxStock?: BoxStockItem[];
+  box_quantity?: number;
   images: ProductImage[];
   createdAt?: string;
   updatedAt?: string;
@@ -89,17 +97,37 @@ export interface SoldProductAnalyticsItem {
   name: string;
   colour: string;
   material: string;
+  type: string;
   size: string;
   quantity: number;
   soldPrice: number;
-  landingPrice: number;
+  landingPrice: number | null;
   soldAt: string;
+  soldBy?: string;
   imagePath?: string;
 }
 
 export interface SoldProductsAnalyticsResponse {
   date: string;
+  viewer?: {
+    canViewLandingPrice: boolean;
+  };
   items: SoldProductAnalyticsItem[];
+}
+
+export interface AuthSession {
+  user: {
+    id: number;
+    fname: string;
+    lname: string;
+    phoneNumber: string;
+    role: string;
+  };
+  store: {
+    id: number;
+    storeName: string;
+    storeRole: string;
+  } | null;
 }
 // New sold-product feature code ends.
 
@@ -136,8 +164,14 @@ class APIClient {
   private normalizeProduct(product: Product): Product {
     return {
       ...product,
+      landingPrice: product.landingPrice === null ? null : Number(product.landingPrice || 0),
       inventory: (product.inventory || []).map((item) => ({
         size: Number(item.size),
+        quantity: Number(item.quantity || 0),
+      })),
+      boxStock: (product.boxStock || []).map((item) => ({
+        id: Number(item.id),
+        sizeRange: String(item.sizeRange || ''),
         quantity: Number(item.quantity || 0),
       })),
       images: (product.images || []).map((image) => ({
@@ -156,7 +190,7 @@ class APIClient {
       ...item,
       quantity: Number(item.quantity || 0),
       soldPrice: Number(item.soldPrice || 0),
-      landingPrice: Number(item.landingPrice || 0),
+      landingPrice: item.landingPrice === null ? null : Number(item.landingPrice || 0),
       imagePath:
         item.imagePath && item.imagePath.startsWith('/') && this.assetBaseUrl
           ? `${this.assetBaseUrl}${item.imagePath}`
@@ -211,6 +245,10 @@ class APIClient {
   async getMetadata(): Promise<Metadata> {
     const response = await this.request<{ data: Metadata }>('GET', '/meta');
     return response.data || { types: [], seasons: [], colours: [], materials: [] };
+  }
+
+  async getAuthSession(): Promise<AuthSession> {
+    return this.request('GET', '/auth/me');
   }
 
   async getProducts(): Promise<Product[]> {
@@ -292,6 +330,7 @@ class APIClient {
 
     return {
       date: response.data?.date || date || '',
+      viewer: response.data?.viewer,
       items: (response.data?.items || []).map((item) => this.normalizeSoldProduct(item)),
     };
   }

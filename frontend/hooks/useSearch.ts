@@ -13,6 +13,12 @@ function searchableProductText(product: Product): string {
       `${item.size}x${item.quantity}`,
       `${item.size} ${item.quantity}`,
     ]);
+  const boxStock = (product.boxStock || []).flatMap((item) => [
+    item.sizeRange,
+    `${item.quantity} box`,
+    `${item.quantity} boxes`,
+    `box ${item.sizeRange}`,
+  ]);
 
   return [
     product.artNo,
@@ -22,6 +28,7 @@ function searchableProductText(product: Product): string {
     product.type,
     ...(product.seasons || []),
     ...existingSizes,
+    ...boxStock,
   ]
     .map(normalizeSearchValue)
     .filter(Boolean)

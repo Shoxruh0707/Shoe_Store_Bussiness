@@ -234,6 +234,14 @@ function parsePositiveNumber(value) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
+function parseNonNegativeInteger(value) {
+  const text = cleanText(value);
+  if (!/^\d+$/.test(text)) return null;
+
+  const number = Number(text);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
 // New sold-product feature code starts.
 function parseNonNegativeDecimal(value) {
   const text = cleanText(value).replace(/,/g, ".");
@@ -287,6 +295,37 @@ function normalizeInventoryRows(rows) {
     .filter((row) => SIZES.includes(row.size) && Number.isInteger(row.quantity) && row.quantity >= 0);
 }
 
+function sizeRangeFromInventory(inventory) {
+  return inventory
+    .filter((row) => row.quantity > 0)
+    .map((row) => (row.quantity === 1 ? row.size : `${row.size}x${row.quantity}`))
+    .join(",");
+}
+
+function inventoryFromSizeRange(sizeRange) {
+  const quantitiesBySize = new Map(SIZES.map((size) => [size, 0]));
+
+  for (const token of String(sizeRange || "").split(",")) {
+    const part = cleanText(token);
+    if (!part) continue;
+
+    const match = part.match(/^(\d+)(?:x(\d+))?$/);
+    const normalizedSize = match?.[1] || "";
+    const quantity = match?.[2] === undefined ? 1 : Number(match[2]);
+
+    if (!match || !SIZES.includes(normalizedSize) || !Number.isInteger(quantity) || quantity <= 0) {
+      throw Object.assign(new Error("Box size range is invalid."), { statusCode: 400 });
+    }
+
+    quantitiesBySize.set(normalizedSize, (quantitiesBySize.get(normalizedSize) || 0) + quantity);
+  }
+
+  return SIZES.map((size) => ({
+    size,
+    quantity: quantitiesBySize.get(size) || 0
+  })).filter((row) => row.quantity > 0);
+}
+
 function inventoryForClient(rows) {
   const quantitiesBySize = new Map(
     (Array.isArray(rows) ? rows : []).map((row) => [cleanText(row.size), Number(row.quantity || 0)])
@@ -296,6 +335,16 @@ function inventoryForClient(rows) {
     size: Number(size),
     quantity: quantitiesBySize.get(size) || 0
   }));
+}
+
+function boxStockForClient(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      id: Number(row.id),
+      sizeRange: cleanText(row.sizeRange),
+      quantity: Number(row.quantity || 0)
+    }))
+    .filter((row) => row.id && row.sizeRange && row.quantity > 0);
 }
 
 function apiData(response, data, statusCode = 200) {
@@ -422,6 +471,7 @@ function validateProductPayload(payload) {
   const colour = cleanText(payload.colour);
   const material = cleanText(payload.material);
   const inventory = normalizeInventoryRows(payload.inventory);
+  const boxQuantity = parseNonNegativeInteger(payload.box_quantity ?? payload.boxQuantity ?? 0);
   const images = normalizeImages(payload.images);
 
   if (!artNo) return { error: "Artno kiritilishi kerak." };
@@ -431,6 +481,10 @@ function validateProductPayload(payload) {
   if (landingPrice === null) return { error: "Kelish narxi musbat son bo'lishi kerak." };
   if (!colour) return { error: "Rang kiritilishi kerak." };
   if (!material) return { error: "Material kiritilishi kerak." };
+  if (boxQuantity === null) return { error: "Box quantity must be a whole number greater than or equal to 0." };
+  if (boxQuantity > 0 && !inventory.some((row) => row.quantity > 0)) {
+    return { error: "At least one size quantity is required when adding boxes." };
+  }
 
   return {
     product: {
@@ -443,6 +497,7 @@ function validateProductPayload(payload) {
       colour,
       material,
       inventory,
+      boxQuantity,
       images
     }
   };
@@ -533,9 +588,11 @@ async function ensureSoldProductsTable() {
 
   const [landingPriceChecks] = await pool.execute(
     `SELECT 1
-     FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS
+     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
      WHERE CONSTRAINT_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'sold_products'
        AND CONSTRAINT_NAME = 'chk_sold_products_landing_price'
+       AND CONSTRAINT_TYPE = 'CHECK'
      LIMIT 1`
   );
 
@@ -821,6 +878,19 @@ function currentStoreId(request) {
   return request.store?.id || defaultStoreId;
 }
 
+function canViewLandingPrice(request) {
+  return request.user?.role === "admin" || ["owner", "manager"].includes(request.store?.storeRole);
+}
+
+function productForClient(request, product) {
+  if (!product || canViewLandingPrice(request)) return product;
+
+  return {
+    ...product,
+    landingPrice: null
+  };
+}
+
 async function writeInventoryRows(connection, variantId, price, inventory, storeId) {
   await connection.execute("DELETE FROM inventory WHERE product_variant_id = ? AND store_id = ?", [variantId, storeId]);
 
@@ -867,6 +937,132 @@ async function addInventoryRows(connection, variantId, price, inventory, storeId
         [variantId, row.size, row.quantity, storeId, price]
       );
     }
+  }
+}
+
+async function ensureBoxStockTable() {
+  await pool.execute(
+    `CREATE TABLE IF NOT EXISTS box_stock (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      product_variant_id INT NOT NULL,
+      size_range VARCHAR(255) NOT NULL,
+      quantity INT NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      CONSTRAINT fk_box_stock_variant
+        FOREIGN KEY (product_variant_id) REFERENCES product_variant(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+      CONSTRAINT chk_box_stock_quantity
+        CHECK (quantity >= 0)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+  );
+
+  const indexes = [
+    ["idx_box_stock_product_variant_id", "product_variant_id"],
+    ["idx_box_stock_quantity", "quantity"]
+  ];
+
+  for (const [indexName, columnName] of indexes) {
+    const [existing] = await pool.execute(
+      `SELECT 1
+       FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'box_stock'
+         AND INDEX_NAME = ?
+       LIMIT 1`,
+      [indexName]
+    );
+
+    if (!existing.length) {
+      await pool.query(`CREATE INDEX \`${indexName}\` ON box_stock(\`${columnName}\`)`);
+    }
+  }
+}
+
+async function writeBoxStockRow(connection, variantId, inventory, boxQuantity) {
+  if (boxQuantity <= 0) return;
+
+  const sizeRange = sizeRangeFromInventory(inventory);
+  if (!sizeRange) {
+    throw Object.assign(new Error("At least one size quantity is required when adding boxes."), { statusCode: 400 });
+  }
+
+  await connection.execute(
+    "INSERT INTO box_stock (product_variant_id, size_range, quantity) VALUES (?, ?, ?)",
+    [variantId, sizeRange, boxQuantity]
+  );
+}
+
+async function writeStockRowsForProduct(connection, variantId, price, inventory, storeId, boxQuantity) {
+  if (boxQuantity > 0) {
+    await writeBoxStockRow(connection, variantId, inventory, boxQuantity);
+    return;
+  }
+
+  await writeInventoryRows(connection, variantId, price, inventory, storeId);
+}
+
+async function addStockRowsForProduct(connection, variantId, price, inventory, storeId, boxQuantity) {
+  if (boxQuantity > 0) {
+    await writeBoxStockRow(connection, variantId, inventory, boxQuantity);
+    return;
+  }
+
+  await addInventoryRows(connection, variantId, price, inventory, storeId);
+}
+
+async function openBoxStock(boxStockId, storeId = defaultStoreId, priceOverride = null) {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [[boxStock]] = await connection.execute(
+      `SELECT
+         bs.id,
+         bs.product_variant_id AS productVariantId,
+         bs.size_range AS sizeRange,
+         bs.quantity,
+         p.price
+       FROM box_stock bs
+       INNER JOIN product_variant pv ON pv.id = bs.product_variant_id
+       INNER JOIN products p ON p.id = pv.product_id
+       WHERE bs.id = ?
+       FOR UPDATE`,
+      [boxStockId]
+    );
+
+    if (!boxStock) {
+      throw Object.assign(new Error("Box stock record was not found."), { statusCode: 404 });
+    }
+
+    if (Number(boxStock.quantity) <= 0) {
+      throw Object.assign(new Error("No unopened boxes are available."), { statusCode: 400 });
+    }
+
+    const price = priceOverride === null ? boxStock.price : priceOverride;
+    const inventory = inventoryFromSizeRange(boxStock.sizeRange);
+
+    await connection.execute("UPDATE box_stock SET quantity = quantity - 1, updated_at = NOW() WHERE id = ?", [
+      boxStock.id
+    ]);
+    await addInventoryRows(connection, boxStock.productVariantId, price, inventory, storeId);
+    await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [boxStock.productVariantId]);
+
+    await connection.commit();
+    return {
+      productVariantId: boxStock.productVariantId,
+      remainingQuantity: Number(boxStock.quantity) - 1,
+      inventory
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
   }
 }
 
@@ -1021,11 +1217,16 @@ async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
     "SELECT id, image_path AS path FROM product_images WHERE product_variant_id = ? ORDER BY id",
     [product.variantId]
   );
+  const [boxStockRows] = await pool.execute(
+    "SELECT id, size_range AS sizeRange, quantity FROM box_stock WHERE product_variant_id = ? AND quantity > 0 ORDER BY id",
+    [product.variantId]
+  );
 
   return {
     ...product,
     seasons: seasonsForClient(product.seasonValues),
     inventory: inventoryForClient(inventoryRows),
+    boxStock: boxStockForClient(boxStockRows),
     images: imageRows
   };
 }
@@ -1224,6 +1425,7 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
       return;
     }
 
+    const sellerOnly = !canViewLandingPrice(request);
     const [rows] = await pool.execute(
       `SELECT
          sp.id,
@@ -1234,8 +1436,10 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
          sp.sold_at AS soldAt,
          p.art_no AS artNo,
          p.name,
+         st.type,
          c.colour_name AS colour,
          m.material_type AS material,
+         CONCAT(u.fname, ' ', u.lname) AS soldBy,
          (
            SELECT pi.image_path
            FROM product_images pi
@@ -1246,22 +1450,28 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
        FROM sold_products sp
        INNER JOIN product_variant pv ON pv.id = sp.product_variant_id
        INNER JOIN products p ON p.id = pv.product_id
+       LEFT JOIN shoe_type st ON st.id = p.type_id
        INNER JOIN colours c ON c.id = pv.colour_id
        INNER JOIN materials m ON m.id = pv.material_id
+       LEFT JOIN users u ON u.id = sp.user_id
        WHERE sp.store_id = ?
          AND sp.sold_at >= ?
          AND sp.sold_at < DATE_ADD(?, INTERVAL 1 DAY)
+         ${sellerOnly ? "AND sp.user_id = ?" : ""}
        ORDER BY sp.sold_at DESC, sp.id DESC`,
-      [currentStoreId(request), saleDate, saleDate]
+      sellerOnly ? [currentStoreId(request), saleDate, saleDate, request.user.id] : [currentStoreId(request), saleDate, saleDate]
     );
 
     apiData(response, {
       date: saleDate,
+      viewer: {
+        canViewLandingPrice: canViewLandingPrice(request)
+      },
       items: rows.map((row) => ({
         ...row,
         quantity: Number(row.quantity || 0),
         soldPrice: Number(row.soldPrice || 0),
-        landingPrice: Number(row.landingPrice || 0)
+        landingPrice: canViewLandingPrice(request) ? Number(row.landingPrice || 0) : null
       }))
     });
   } catch (error) {
@@ -1285,7 +1495,9 @@ app.get("/api/products", requireAuth, requireStoreOwner, async (request, respons
       [storeId]
     );
 
-    const products = (await Promise.all(rows.map((row) => fetchProduct(row.id, storeId, row.variantId)))).filter(Boolean);
+    const products = (await Promise.all(rows.map((row) => fetchProduct(row.id, storeId, row.variantId))))
+      .filter(Boolean)
+      .map((product) => productForClient(request, product));
     apiData(response, products);
   } catch (error) {
     next(error);
@@ -1309,7 +1521,7 @@ app.get("/api/products/match", requireAuth, requireStoreOwner, async (request, r
       return;
     }
 
-    apiData(response, [await fetchProduct(match.productId, currentStoreId(request))].filter(Boolean));
+    apiData(response, [productForClient(request, await fetchProduct(match.productId, currentStoreId(request)))].filter(Boolean));
   } catch (error) {
     next(error);
   }
@@ -1324,7 +1536,11 @@ app.get("/api/products/lookup", requireAuth, requireStoreOwner, async (request, 
       return;
     }
 
-    apiData(response, await fetchProductLookupByArtNo(artNo, currentStoreId(request)));
+    const lookup = await fetchProductLookupByArtNo(artNo, currentStoreId(request));
+    if (lookup?.product && !canViewLandingPrice(request)) {
+      lookup.product.landingPrice = null;
+    }
+    apiData(response, lookup);
   } catch (error) {
     next(error);
   }
@@ -1337,7 +1553,7 @@ app.get("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
       apiMessage(response, "Mahsulot topilmadi.", 404);
       return;
     }
-    apiData(response, product);
+    apiData(response, productForClient(request, product));
   } catch (error) {
     next(error);
   }
@@ -1364,7 +1580,7 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
     const existing = await findMatchingProductVariant(connection, data, colourId, materialId);
 
     if (existing) {
-      await addInventoryRows(connection, existing.variantId, data.price, data.inventory, storeId);
+      await addStockRowsForProduct(connection, existing.variantId, data.price, data.inventory, storeId, data.boxQuantity);
       await saveProductImages(connection, existing.variantId, data.images);
       await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [existing.productId]);
       await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [existing.variantId]);
@@ -1391,7 +1607,7 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
         [data.name || data.artNo, typeId, data.landingPrice, data.price, existingProduct.productId]
       );
       await writeProductSeasons(connection, existingProduct.productId, data.seasons);
-      await writeInventoryRows(connection, variantInsert.insertId, data.price, data.inventory, storeId);
+      await writeStockRowsForProduct(connection, variantInsert.insertId, data.price, data.inventory, storeId, data.boxQuantity);
       await saveProductImages(connection, variantInsert.insertId, data.images);
       await connection.commit();
 
@@ -1411,7 +1627,7 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
     );
 
     await writeProductSeasons(connection, productInsert.insertId, data.seasons);
-    await writeInventoryRows(connection, variantInsert.insertId, data.price, data.inventory, storeId);
+    await writeStockRowsForProduct(connection, variantInsert.insertId, data.price, data.inventory, storeId, data.boxQuantity);
     await saveProductImages(connection, variantInsert.insertId, data.images);
     await connection.commit();
 
@@ -1572,6 +1788,7 @@ app.listen(port, host, async () => {
   try {
     await testConnection();
     await removeArtNoUniqueIndexes();
+    await ensureBoxStockTable();
     await ensureSoldProductsTable();
     await cleanupStaleTempUploads();
     setInterval(() => {

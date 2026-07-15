@@ -6,6 +6,7 @@
 -- - payment_details, delivery, orders, and order_items are removed for now.
 -- - products table includes landing_price column.
 -- - product seasons are stored in product_seasons table so one product can belong to multiple seasons.
+-- - box_stock stores unopened boxes per product variant.
 -- - sold_products stores manually marked sales with sold prices.
 
 CREATE DATABASE IF NOT EXISTS shoes_store_db
@@ -18,6 +19,8 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS inventory;
 DROP TABLE IF EXISTS sold_products;
+DROP TABLE IF EXISTS box_stock;
+DROP TABLE IF EXISTS seller_store_requests;
 DROP TABLE IF EXISTS product_images;
 DROP TABLE IF EXISTS product_seasons;
 DROP TABLE IF EXISTS product_variant;
@@ -95,6 +98,38 @@ CREATE TABLE store_users (
 CREATE INDEX idx_store_users_user_id ON store_users(user_id);
 CREATE INDEX idx_store_users_store_id ON store_users(store_id);
 CREATE INDEX idx_store_users_role ON store_users(role);
+
+-- =========================
+-- Seller Store Requests
+-- =========================
+CREATE TABLE seller_store_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    seller_user_id INT NOT NULL,
+    store_id INT NOT NULL,
+    status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+    requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME NULL,
+    resolved_by_user_id INT NULL,
+
+    CONSTRAINT fk_seller_store_requests_seller
+        FOREIGN KEY (seller_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_seller_store_requests_store
+        FOREIGN KEY (store_id) REFERENCES store(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_seller_store_requests_resolver
+        FOREIGN KEY (resolved_by_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX idx_seller_store_requests_seller_user_id ON seller_store_requests(seller_user_id);
+CREATE INDEX idx_seller_store_requests_store_id ON seller_store_requests(store_id);
+CREATE INDEX idx_seller_store_requests_status ON seller_store_requests(status);
 
 -- =========================
 -- Lookup Tables
@@ -255,6 +290,29 @@ CREATE TABLE inventory (
 CREATE INDEX idx_inventory_product_variant_id ON inventory(product_variant_id);
 CREATE INDEX idx_inventory_store_id ON inventory(store_id);
 CREATE INDEX idx_inventory_size ON inventory(size);
+
+-- =========================
+-- Box Stock
+-- =========================
+CREATE TABLE box_stock (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_variant_id INT NOT NULL,
+    size_range VARCHAR(255) NOT NULL,
+    quantity INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_box_stock_variant
+        FOREIGN KEY (product_variant_id) REFERENCES product_variant(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    CONSTRAINT chk_box_stock_quantity
+        CHECK (quantity >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX idx_box_stock_product_variant_id ON box_stock(product_variant_id);
+CREATE INDEX idx_box_stock_quantity ON box_stock(quantity);
 
 -- New sold-product feature code starts.
 -- =========================

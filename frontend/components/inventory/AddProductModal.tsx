@@ -37,6 +37,7 @@ const emptyProductForm = (): Product => ({
     size,
     quantity: 0,
   })),
+  box_quantity: 0,
   images: [],
 });
 
@@ -102,6 +103,12 @@ export function AddProductModal({
     }));
     setUnsavedChanges(true);
     setSubmitError(null);
+  };
+
+  const handleBoxQuantityChange = (value: string) => {
+    if (!/^\d*$/.test(value)) return;
+
+    handleFieldChange('box_quantity', value === '' ? undefined : Number(value));
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -219,6 +226,7 @@ export function AddProductModal({
       setSubmitError(null);
       await onSave({
         ...formData,
+        box_quantity: Math.max(0, Math.floor(Number(formData.box_quantity || 0))),
         images: formData.images.map(({ uploading, error, data, ...image }) => image),
       });
       setFormData(emptyProductForm());
@@ -261,6 +269,7 @@ export function AddProductModal({
   const isLastStep = currentStepIndex === visibleSteps.length - 1;
 
   const totalInventory = formData.inventory.reduce((sum, item) => sum + item.quantity, 0);
+  const boxQuantity = formData.box_quantity ?? '';
   const sellingPrice = Number(formData.price || 0);
   const landingPrice = Number(formData.landingPrice || 0);
   const hasUploadingImages = formData.images.some((image) => image.uploading);
@@ -630,7 +639,7 @@ export function AddProductModal({
                       <input
                         type="text"
                         inputMode="decimal"
-                        value={formData.landingPrice}
+                        value={formData.landingPrice ?? ''}
                         onChange={(e) => handleFieldChange('landingPrice', e.target.value)}
                         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
                         placeholder="Enter landing price"
@@ -696,6 +705,30 @@ export function AddProductModal({
                         </div>
                       ))}
                     </div>
+                  </div>
+
+                  <div className="border-t border-gray-200 pt-4 dark:border-gray-800">
+                    <label
+                      htmlFor="box-quantity"
+                      className="block text-sm font-medium text-gray-900 dark:text-gray-100"
+                    >
+                      Box Quantity
+                    </label>
+                    <input
+                      id="box-quantity"
+                      type="number"
+                      min={0}
+                      step={1}
+                      inputMode="numeric"
+                      value={boxQuantity}
+                      onChange={(event) => handleBoxQuantityChange(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (['-', '+', '.', ',', 'e', 'E'].includes(event.key)) {
+                          event.preventDefault();
+                        }
+                      }}
+                      className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
+                    />
                   </div>
                 </div>
               )}

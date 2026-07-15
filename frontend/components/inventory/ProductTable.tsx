@@ -29,6 +29,10 @@ function getExistingSizes(inventory: { size: number; quantity: number }[]) {
     .sort((a, b) => a.size - b.size);
 }
 
+function getBoxStock(product: Product) {
+  return (product.boxStock || []).filter((item) => item.quantity > 0);
+}
+
 function productRowKey(product: Product) {
   return product.variantId ? `variant-${product.variantId}` : `product-${product.id}`;
 }
@@ -44,6 +48,7 @@ function MobileProductCard({
   const stockInfo = getStockStatus(product.inventory);
   const totalStock = getTotalStock(product.inventory);
   const existingSizes = getExistingSizes(product.inventory);
+  const boxStock = getBoxStock(product);
 
   return (
     <button
@@ -97,6 +102,18 @@ function MobileProductCard({
               <span className="text-[11px] text-gray-500 dark:text-gray-400">No sizes in stock</span>
             )}
           </div>
+          {boxStock.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {boxStock.map((item) => (
+                <span
+                  key={item.id}
+                  className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200"
+                >
+                  Box {item.quantity}x: {item.sizeRange}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </button>
@@ -131,6 +148,7 @@ function DesktopProductTable({
           {products.map((product) => {
             const stockInfo = getStockStatus(product.inventory);
             const existingSizes = getExistingSizes(product.inventory);
+            const boxStock = getBoxStock(product);
 
             return (
               <tr
@@ -204,6 +222,18 @@ function DesktopProductTable({
                       <span className="text-xs text-gray-500 dark:text-gray-400">No stock</span>
                     )}
                   </div>
+                  {boxStock.length > 0 && (
+                    <div className="mt-2 flex max-w-xs flex-wrap gap-1">
+                      {boxStock.map((item) => (
+                        <span
+                          key={item.id}
+                          className="rounded border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200"
+                        >
+                          Box {item.quantity}x: {item.sizeRange}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`inline-block rounded px-2.5 py-0.5 text-xs font-medium ${stockInfo.color}`}>
