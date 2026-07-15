@@ -20,7 +20,6 @@ interface SoldProductFormState {
   materialType: string;
   size: string;
   soldPrice: string;
-  quantity: string;
 }
 
 const initialFormState: SoldProductFormState = {
@@ -29,8 +28,35 @@ const initialFormState: SoldProductFormState = {
   materialType: '',
   size: '',
   soldPrice: '',
-  quantity: '1',
 };
+
+function sizesFromBoxRange(sizeRange: string) {
+  return String(sizeRange || '')
+    .split(',')
+    .map((part) => part.trim().split('x')[0])
+    .map(Number)
+    .filter((size) => (SHOE_SIZES as readonly number[]).includes(size));
+}
+
+function availableSizesForProduct(product: Product | null) {
+  if (!product) return [];
+
+  const quantities = new Map<number, number>();
+  (product.inventory || [])
+    .filter((item) => item.quantity > 0)
+    .forEach((item) => quantities.set(item.size, item.quantity));
+
+  (product.boxStock || [])
+    .filter((item) => item.quantity > 0)
+    .flatMap((item) => sizesFromBoxRange(item.sizeRange))
+    .forEach((size) => {
+      if (!quantities.has(size)) quantities.set(size, 0);
+    });
+
+  return [...quantities.entries()]
+    .map(([size, quantity]) => ({ size, quantity }))
+    .sort((left, right) => left.size - right.size);
+}
 
 // New sold-product feature code starts.
 export function SoldProductModal({
@@ -56,7 +82,12 @@ export function SoldProductModal({
   }, [isOpen]);
 
   const stockProducts = useMemo(
-    () => products.filter((product) => (product.inventory || []).some((item) => item.quantity > 0)),
+    () =>
+      products.filter(
+        (product) =>
+          (product.inventory || []).some((item) => item.quantity > 0) ||
+          (product.boxStock || []).some((item) => item.quantity > 0)
+      ),
     [products]
   );
 
@@ -68,6 +99,10 @@ export function SoldProductModal({
             .filter((item) => item.quantity > 0)
             .map((item) => `${item.size} ${item.size}x${item.quantity}`)
             .join(' ');
+          const boxStock = (product.boxStock || [])
+            .filter((item) => item.quantity > 0)
+            .map((item) => `${item.quantity} ${item.sizeRange}`)
+            .join(' ');
           const text = [
             product.artNo,
             product.name,
@@ -76,6 +111,7 @@ export function SoldProductModal({
             product.type,
             product.price,
             sizes,
+            boxStock,
           ]
             .join(' ')
             .toLowerCase();
@@ -91,9 +127,7 @@ export function SoldProductModal({
     [selectedVariantId, stockProducts]
   );
 
-  const availableSizes = selectedProduct
-    ? selectedProduct.inventory.filter((item) => item.quantity > 0).sort((a, b) => a.size - b.size)
-    : [];
+  const availableSizes = availableSizesForProduct(selectedProduct);
 
   if (!isOpen) return null;
 
@@ -106,9 +140,7 @@ export function SoldProductModal({
   };
 
   const selectProduct = (product: Product) => {
-    const firstAvailableSize = (product.inventory || [])
-      .filter((item) => item.quantity > 0)
-      .sort((a, b) => a.size - b.size)[0];
+    const firstAvailableSize = availableSizesForProduct(product)[0];
 
     setSelectedVariantId(product.variantId || null);
     setProductSearch(`${product.artNo} ${product.colour} ${product.material}`);
@@ -119,7 +151,6 @@ export function SoldProductModal({
       materialType: product.material,
       size: firstAvailableSize ? String(firstAvailableSize.size) : current.size,
       soldPrice: current.soldPrice || String(product.price || ''),
-      quantity: current.quantity || '1',
     }));
     setError(null);
   };
@@ -127,7 +158,7 @@ export function SoldProductModal({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const quantity = Number(formData.quantity || 1);
+    const quantity = 1;
     const soldPrice = Number(formData.soldPrice);
 
     if (
@@ -146,26 +177,50 @@ export function SoldProductModal({
       return;
     }
 
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      setError('Quantity sold must be a positive whole number.');
-      return;
-    }
-
     try {
-      await onSubmit({
+      const payload = {
         art_no: formData.artNo.trim(),
         colour_name: formData.colourName.trim(),
         material_type: formData.materialType.trim(),
         size: formData.size,
         sold_price: soldPrice,
         quantity,
-      });
+      };
+
+      await onSubmit(payload);
 
       setFormData(initialFormState);
       setProductSearch('');
       setSelectedVariantId(null);
       onClose();
     } catch (submitError) {
+      if (
+        submitError instanceof Error &&
+        (submitError as any).requiresBoxOpen &&
+        window.confirm(`${submitError.message}\n\nOpen one box and continue the sale?`)
+      ) {
+        try {
+          await onSubmit({
+            art_no: formData.artNo.trim(),
+            colour_name: formData.colourName.trim(),
+            material_type: formData.materialType.trim(),
+            size: formData.size,
+            sold_price: soldPrice,
+            quantity,
+            open_box_if_needed: true,
+          });
+
+          setFormData(initialFormState);
+          setProductSearch('');
+          setSelectedVariantId(null);
+          onClose();
+          return;
+        } catch (retryError) {
+          setError(retryError instanceof Error ? retryError.message : 'Failed to open box and mark product as sold.');
+          return;
+        }
+      }
+
       setError(submitError instanceof Error ? submitError.message : 'Failed to mark product as sold.');
     }
   };
@@ -219,6 +274,7 @@ export function SoldProductModal({
                   {filteredStockProducts.length > 0 ? (
                     filteredStockProducts.map((product) => {
                       const sizes = (product.inventory || []).filter((item) => item.quantity > 0);
+                      const boxStock = (product.boxStock || []).filter((item) => item.quantity > 0);
                       const isSelected = selectedVariantId === product.variantId;
 
                       return (
@@ -251,6 +307,14 @@ export function SoldProductModal({
                                     className="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[11px] font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
                                   >
                                     {item.size}x{item.quantity}
+                                  </span>
+                                ))}
+                                {boxStock.map((item) => (
+                                  <span
+                                    key={item.id}
+                                    className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200"
+                                  >
+                                    {item.quantity} {item.sizeRange}
                                   </span>
                                 ))}
                               </div>
@@ -320,7 +384,7 @@ export function SoldProductModal({
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
                     Size <span className="text-red-600">*</span>
@@ -339,7 +403,7 @@ export function SoldProductModal({
                   </select>
                   {selectedProduct && (
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Available: {availableSizes.map((item) => `${item.size}x${item.quantity}`).join(', ')}
+                      Available: {availableSizes.map((item) => (item.quantity > 0 ? `${item.size}x${item.quantity}` : `${item.size} in box`)).join(', ')}
                     </p>
                   )}
                 </div>
@@ -356,20 +420,6 @@ export function SoldProductModal({
                     onChange={(event) => updateField('soldPrice', event.target.value)}
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
                     placeholder="0.00"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                    Quantity sold <span className="text-red-600">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={formData.quantity}
-                    onChange={(event) => updateField('quantity', event.target.value)}
-                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
                   />
                 </div>
               </div>

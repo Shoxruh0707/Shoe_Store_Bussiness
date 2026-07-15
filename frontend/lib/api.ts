@@ -83,12 +83,28 @@ export interface SoldProductPayload {
   size: string;
   sold_price: number;
   quantity: number;
+  open_box_if_needed?: boolean;
 }
 
 export interface SoldProductResponse {
   success: boolean;
   message: string;
   remaining_quantity: number;
+  opened_box?: boolean;
+}
+
+export class APIError extends Error {
+  status: number;
+  data: any;
+  requiresBoxOpen: boolean;
+
+  constructor(message: string, status: number, data: any = {}) {
+    super(message);
+    this.name = 'APIError';
+    this.status = status;
+    this.data = data;
+    this.requiresBoxOpen = Boolean(data?.requiresBoxOpen);
+  }
 }
 
 export interface SoldProductAnalyticsItem {
@@ -232,7 +248,11 @@ class APIClient {
       const error = contentType.includes('application/json')
         ? await response.json().catch(() => ({}))
         : { message: await response.text().catch(() => '') };
-      throw new Error(error.error || error.message || `API Error: ${response.statusText || response.status}`);
+      throw new APIError(
+        error.error || error.message || `API Error: ${response.statusText || response.status}`,
+        response.status,
+        error
+      );
     }
 
     return response.json();

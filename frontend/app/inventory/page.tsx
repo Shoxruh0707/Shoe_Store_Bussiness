@@ -20,7 +20,6 @@ export default function InventoryPage() {
     error,
     createProduct,
     updateProduct,
-    deleteProduct,
     markProductSold,
   } = useProducts();
 
@@ -49,28 +48,6 @@ export default function InventoryPage() {
     setSelectedProduct(product);
     setIsDrawerOpen(true);
     setEditingProduct(null);
-  };
-
-  const handleEditProduct = (product: Product) => {
-    setEditingProduct(product);
-    setIsAddModalOpen(true);
-    setIsDrawerOpen(false);
-  };
-
-  const handleDeleteProduct = async (product: Product) => {
-    if (!product.id) return;
-    if (!window.confirm(`Are you sure you want to delete ${product.name}?`)) return;
-
-    setIsSubmitting(true);
-    try {
-      const success = await deleteProduct(product.id);
-      if (success) {
-        setIsDrawerOpen(false);
-        setSelectedProduct(null);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   const handleSaveProduct = async (product: Product) => {
@@ -111,6 +88,9 @@ export default function InventoryPage() {
       return message;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to mark product as sold.';
+      if ((error as any)?.requiresBoxOpen) {
+        throw error;
+      }
       setSaleMessage({ type: 'error', text: message });
       throw error;
     } finally {
@@ -216,9 +196,6 @@ export default function InventoryPage() {
           setIsDrawerOpen(false);
           setSelectedProduct(null);
         }}
-        onEdit={handleEditProduct}
-        onDelete={handleDeleteProduct}
-        canManageInventory={canManageInventory}
         canViewLandingPrice={canManageInventory}
       />
 

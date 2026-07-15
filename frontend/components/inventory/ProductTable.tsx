@@ -33,6 +33,61 @@ function getBoxStock(product: Product) {
   return (product.boxStock || []).filter((item) => item.quantity > 0);
 }
 
+function parseBoxSizeRange(sizeRange: string) {
+  const quantities = new Map<number, number>();
+
+  String(sizeRange || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach((part) => {
+      const [rawSize, rawQuantity] = part.split('x');
+      const size = Number(rawSize);
+      const quantity = rawQuantity ? Number(rawQuantity) : 1;
+      if (Number.isInteger(size) && Number.isInteger(quantity) && quantity > 0) {
+        quantities.set(size, Math.max(quantities.get(size) || 0, quantity));
+      }
+    });
+
+  return quantities;
+}
+
+function compactBoxSizeRange(sizeRange: string) {
+  const quantities = parseBoxSizeRange(sizeRange);
+  const sizes = [...quantities.keys()].sort((a, b) => a - b);
+  if (!sizes.length) return sizeRange;
+
+  const ranges: string[] = [];
+  let start = sizes[0];
+  let previous = sizes[0];
+
+  for (const size of sizes.slice(1)) {
+    if (size === previous + 1) {
+      previous = size;
+      continue;
+    }
+
+    ranges.push(start === previous ? String(start) : `${start}-${previous}`);
+    start = size;
+    previous = size;
+  }
+
+  ranges.push(start === previous ? String(start) : `${start}-${previous}`);
+
+  const repeated = sizes
+    .filter((size) => (quantities.get(size) || 0) > 1)
+    .map((size) => `${size}x${quantities.get(size)}`);
+
+  return [...ranges, ...repeated].join(', ');
+}
+
+function boxSummary(boxStock: ReturnType<typeof getBoxStock>) {
+  return {
+    quantity: boxStock.reduce((sum, item) => sum + item.quantity, 0),
+    ranges: boxStock.map((item) => compactBoxSizeRange(item.sizeRange)).filter(Boolean),
+  };
+}
+
 function productRowKey(product: Product) {
   return product.variantId ? `variant-${product.variantId}` : `product-${product.id}`;
 }
@@ -49,15 +104,16 @@ function MobileProductCard({
   const totalStock = getTotalStock(product.inventory);
   const existingSizes = getExistingSizes(product.inventory);
   const boxStock = getBoxStock(product);
+  const boxes = boxSummary(boxStock);
 
   return (
     <button
       type="button"
       onClick={() => onView(product)}
-      className="block w-full rounded-lg border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/30"
+      className="block w-full rounded-lg border border-gray-200 bg-white p-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/30"
     >
-      <div className="flex gap-3">
-        <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
+      <div className="flex gap-2">
+        <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
           {product.images && product.images.length > 0 ? (
             <img
               src={product.images[0].path || ''}
@@ -66,54 +122,58 @@ function MobileProductCard({
             />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-400">
-              <Package className="h-6 w-6" />
+              <Package className="h-5 w-5" />
             </div>
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-            {product.artNo}
-          </p>
-          <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-            {product.name}
-          </p>
-          <p className="text-xs text-gray-600 dark:text-gray-400">
-            {product.colour} / {product.material}
-          </p>
-          <div className="mt-2 flex items-center justify-between">
-            <span className={`inline-block rounded px-2 py-1 text-xs font-medium ${stockInfo.color}`}>
-              {totalStock}x
-            </span>
-            <span className={`inline-block rounded px-2 py-1 text-xs font-medium ${stockInfo.color}`}>
-              {stockInfo.label}
-            </span>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold leading-4 text-gray-900 dark:text-gray-100">
+                {product.artNo}
+              </p>
+              <p className="truncate text-xs leading-4 text-gray-600 dark:text-gray-400">
+                {product.name}
+              </p>
+              <p className="truncate text-xs leading-4 text-gray-600 dark:text-gray-400">
+                {product.colour} / {product.material}
+              </p>
+            </div>
+            <div className="min-w-14 text-right">
+              {boxes.quantity > 0 && (
+                <p className="text-sm font-bold leading-4 text-sky-700 dark:text-sky-300">{boxes.quantity}</p>
+              )}
+              {boxes.ranges.length > 0 && (
+                <p className="truncate text-[10px] font-medium leading-4 text-sky-700 dark:text-sky-300">
+                  {boxes.ranges.join('; ')}
+                </p>
+              )}
+            </div>
           </div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {existingSizes.length > 0 ? (
-              existingSizes.map((item) => (
-                <span
-                  key={item.size}
-                  className="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[11px] font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-                >
-                  {item.size}x{item.quantity}
-                </span>
-              ))
-            ) : (
-              <span className="text-[11px] text-gray-500 dark:text-gray-400">No sizes in stock</span>
+          <div className="mt-1 flex items-end justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap gap-1">
+              <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${stockInfo.color}`}>
+                {totalStock}x
+              </span>
+              {existingSizes.length > 0 ? (
+                existingSizes.slice(0, 5).map((item) => (
+                  <span
+                    key={item.size}
+                    className="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                  >
+                    {item.size}x{item.quantity}
+                  </span>
+                ))
+              ) : (
+                <span className="text-[10px] text-gray-500 dark:text-gray-400">No sizes</span>
+              )}
+            </div>
+            {existingSizes.length > 0 && (
+              <span className={`flex-shrink-0 rounded px-2 py-0.5 text-[11px] font-medium ${stockInfo.color}`}>
+                {stockInfo.label}
+              </span>
             )}
           </div>
-          {boxStock.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {boxStock.map((item) => (
-                <span
-                  key={item.id}
-                  className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200"
-                >
-                  Box {item.quantity}x: {item.sizeRange}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </button>
@@ -149,6 +209,7 @@ function DesktopProductTable({
             const stockInfo = getStockStatus(product.inventory);
             const existingSizes = getExistingSizes(product.inventory);
             const boxStock = getBoxStock(product);
+            const boxes = boxSummary(boxStock);
 
             return (
               <tr
@@ -222,20 +283,16 @@ function DesktopProductTable({
                       <span className="text-xs text-gray-500 dark:text-gray-400">No stock</span>
                     )}
                   </div>
-                  {boxStock.length > 0 && (
-                    <div className="mt-2 flex max-w-xs flex-wrap gap-1">
-                      {boxStock.map((item) => (
-                        <span
-                          key={item.id}
-                          className="rounded border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200"
-                        >
-                          Box {item.quantity}x: {item.sizeRange}
-                        </span>
-                      ))}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {boxes.quantity > 0 && (
+                    <div className="mb-2">
+                      <p className="text-base font-bold leading-tight text-sky-700 dark:text-sky-300">{boxes.quantity}</p>
+                      <p className="max-w-32 text-xs font-medium text-sky-700 dark:text-sky-300">
+                        {boxes.ranges.join('; ')}
+                      </p>
                     </div>
                   )}
-                </td>
-                <td className="px-4 py-3">
                   <span className={`inline-block rounded px-2.5 py-0.5 text-xs font-medium ${stockInfo.color}`}>
                     {stockInfo.label}
                   </span>

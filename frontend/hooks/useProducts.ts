@@ -116,8 +116,10 @@ export function useProducts(): UseProductsReturn {
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to mark product as sold';
-        setError(message);
-        console.error('[v0] Failed to mark product as sold:', message);
+        if (!(err as any)?.requiresBoxOpen) {
+          setError(message);
+          console.error('[v0] Failed to mark product as sold:', message);
+        }
         throw err;
       }
     },

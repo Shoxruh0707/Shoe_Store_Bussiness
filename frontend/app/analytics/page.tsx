@@ -25,12 +25,26 @@ export default function AnalyticsPage() {
   const [selectedDate, setSelectedDate] = useState(todayForInput);
   const [items, setItems] = useState<SoldProductAnalyticsItem[]>([]);
   const [canViewLandingPrice, setCanViewLandingPrice] = useState(false);
+  const [soldByFilter, setSoldByFilter] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const sellerOptions = useMemo(
+    () =>
+      [...new Set(items.map((item) => item.soldBy).filter((seller): seller is string => Boolean(seller)))].sort(
+        (left, right) => left.localeCompare(right)
+      ),
+    [items]
+  );
+
+  const filteredItems = useMemo(
+    () => (soldByFilter ? items.filter((item) => item.soldBy === soldByFilter) : items),
+    [items, soldByFilter]
+  );
+
   const totals = useMemo(
     () =>
-      items.reduce(
+      filteredItems.reduce(
         (summary, item) => ({
           quantity: summary.quantity + item.quantity,
           revenue: summary.revenue + item.soldPrice * item.quantity,
@@ -38,7 +52,7 @@ export default function AnalyticsPage() {
         }),
         { quantity: 0, revenue: 0, landing: 0 }
       ),
-    [items]
+    [filteredItems]
   );
 
   const fetchSoldProducts = async (date: string) => {
@@ -48,6 +62,7 @@ export default function AnalyticsPage() {
       const result = await api.getSoldProducts(date);
       setItems(result.items);
       setCanViewLandingPrice(Boolean(result.viewer?.canViewLandingPrice));
+      setSoldByFilter('');
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to load sold products.');
     } finally {
@@ -129,9 +144,28 @@ export default function AnalyticsPage() {
 
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-              <BarChart3 className="h-4 w-4" />
-              Sold products for {selectedDate}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                <BarChart3 className="h-4 w-4" />
+                Sold products for {selectedDate}
+              </div>
+              {canViewLandingPrice && sellerOptions.length > 0 && (
+                <label className="inline-flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-300">
+                  Sold by
+                  <select
+                    value={soldByFilter}
+                    onChange={(event) => setSoldByFilter(event.target.value)}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                  >
+                    <option value="">All sellers</option>
+                    {sellerOptions.map((seller) => (
+                      <option key={seller} value={seller}>
+                        {seller}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
           </div>
 
@@ -141,15 +175,15 @@ export default function AnalyticsPage() {
             </div>
           )}
 
-          {!loading && items.length === 0 && (
+          {!loading && filteredItems.length === 0 && (
             <div className="py-10 text-center">
               <BarChart3 className="mx-auto h-10 w-10 text-gray-400 dark:text-gray-600" />
               <p className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">No sold products</p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">Change the date filter to review another day.</p>
+              <p className="text-xs text-gray-600 dark:text-gray-400">Change the date or seller filter to review another set.</p>
             </div>
           )}
 
-          {!loading && items.length > 0 && (
+          {!loading && filteredItems.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
@@ -170,7 +204,7 @@ export default function AnalyticsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => (
+                  {filteredItems.map((item) => (
                     <tr key={item.id} className="border-b border-gray-200 dark:border-gray-800">
                       <td className="px-4 py-3">
                         <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded bg-gray-100 dark:bg-gray-800">

@@ -633,6 +633,7 @@ function validateSoldProductPayload(payload) {
   const size = cleanText(payload?.size);
   const soldPrice = parseNonNegativeDecimal(payload?.sold_price);
   const quantity = Number(payload?.quantity || 1);
+  const openBoxIfNeeded = payload?.open_box_if_needed === true;
 
   if (!artNo) return { error: "Art number is required." };
   if (!colourName) return { error: "Color is required." };
@@ -648,7 +649,8 @@ function validateSoldProductPayload(payload) {
       materialType,
       size,
       soldPrice,
-      quantity
+      quantity,
+      openBoxIfNeeded
     }
   };
 }
@@ -1014,6 +1016,62 @@ async function addStockRowsForProduct(connection, variantId, price, inventory, s
   await addInventoryRows(connection, variantId, price, inventory, storeId);
 }
 
+function inventoryIncludesSize(inventory, size) {
+  return inventory.some((row) => row.size === size && row.quantity > 0);
+}
+
+async function findSaleVariant(connection, sale) {
+  const [matches] = await connection.execute(
+    `SELECT
+       p.id AS productId,
+       p.price,
+       p.landing_price AS landingPrice,
+       pv.id AS productVariantId
+     FROM products p
+     INNER JOIN product_variant pv ON pv.product_id = p.id
+     INNER JOIN colours c ON c.id = pv.colour_id
+     INNER JOIN materials m ON m.id = pv.material_id
+     WHERE p.art_no = ?
+       AND c.colour_name = ?
+       AND m.material_type = ?
+     ORDER BY p.updated_at DESC, p.created_at DESC
+     LIMIT 1`,
+    [sale.artNo, sale.colourName, sale.materialType]
+  );
+
+  return matches[0] || null;
+}
+
+async function findOpenableBoxStock(connection, variantId, size, lock = false) {
+  const [boxes] = await connection.execute(
+    `SELECT id, product_variant_id AS productVariantId, size_range AS sizeRange, quantity
+     FROM box_stock
+     WHERE product_variant_id = ?
+       AND quantity > 0
+     ORDER BY id
+     ${lock ? "FOR UPDATE" : ""}`,
+    [variantId]
+  );
+
+  return boxes.find((box) => inventoryIncludesSize(inventoryFromSizeRange(box.sizeRange), size)) || null;
+}
+
+async function openBoxStockInTransaction(connection, boxStock, storeId, price) {
+  if (!boxStock || Number(boxStock.quantity) <= 0) {
+    throw Object.assign(new Error("No unopened boxes are available."), { statusCode: 400 });
+  }
+
+  const inventory = inventoryFromSizeRange(boxStock.sizeRange);
+
+  await connection.execute("UPDATE box_stock SET quantity = quantity - 1, updated_at = NOW() WHERE id = ?", [
+    boxStock.id
+  ]);
+  await addInventoryRows(connection, boxStock.productVariantId, price, inventory, storeId);
+  await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [boxStock.productVariantId]);
+
+  return inventory;
+}
+
 async function openBoxStock(boxStockId, storeId = defaultStoreId, priceOverride = null) {
   const connection = await pool.getConnection();
 
@@ -1364,15 +1422,66 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
     );
 
     const match = matches[0];
-    if (!match) {
-      await connection.rollback();
-      apiMessage(response, "Product not found in inventory", 404);
-      return;
+    let saleMatch = match;
+
+    if (!saleMatch || Number(saleMatch.quantity || 0) < sale.quantity) {
+      const variant = await findSaleVariant(connection, sale);
+
+      if (!variant) {
+        await connection.rollback();
+        apiMessage(response, "Product is not available at all", 404);
+        return;
+      }
+
+      const boxStock = await findOpenableBoxStock(connection, variant.productVariantId, sale.size, sale.openBoxIfNeeded);
+
+      if (!boxStock) {
+        await connection.rollback();
+        apiMessage(response, "Product is not available at all", 404);
+        return;
+      }
+
+      if (!sale.openBoxIfNeeded) {
+        await connection.rollback();
+        response.status(409).json({
+          success: false,
+          requiresBoxOpen: true,
+          message: "This size is available in unopened box stock. Open one box?",
+          boxStock: {
+            id: boxStock.id,
+            quantity: Number(boxStock.quantity || 0),
+            sizeRange: boxStock.sizeRange
+          }
+        });
+        return;
+      }
+
+      await openBoxStockInTransaction(connection, boxStock, storeId, variant.price);
+
+      const [openedMatches] = await connection.execute(
+        `SELECT
+           p.id AS productId,
+           p.landing_price AS landingPrice,
+           pv.id AS productVariantId,
+           i.id AS inventoryId,
+           i.quantity
+         FROM products p
+         INNER JOIN product_variant pv ON pv.product_id = p.id
+         INNER JOIN inventory i ON i.product_variant_id = pv.id
+         WHERE pv.id = ?
+           AND i.size = ?
+           AND i.store_id = ?
+         LIMIT 1
+         FOR UPDATE`,
+        [variant.productVariantId, sale.size, storeId]
+      );
+
+      saleMatch = openedMatches[0];
     }
 
-    if (Number(match.quantity || 0) < sale.quantity) {
+    if (!saleMatch || Number(saleMatch.quantity || 0) < sale.quantity) {
       await connection.rollback();
-      apiMessage(response, "Not enough quantity in inventory", 400);
+      apiMessage(response, "Not enough quantity in inventory after opening box", 400);
       return;
     }
 
@@ -1387,27 +1496,28 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
       `INSERT INTO sold_products
          (store_id, user_id, product_variant_id, size, quantity, sold_price, landing_price)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [storeId, saleUserId, match.productVariantId, sale.size, sale.quantity, sale.soldPrice, match.landingPrice]
+      [storeId, saleUserId, saleMatch.productVariantId, sale.size, sale.quantity, sale.soldPrice, saleMatch.landingPrice]
     );
 
-    const remainingQuantity = Number(match.quantity) - sale.quantity;
+    const remainingQuantity = Number(saleMatch.quantity) - sale.quantity;
     if (remainingQuantity > 0) {
       await connection.execute("UPDATE inventory SET quantity = ?, updated_at = NOW() WHERE id = ?", [
         remainingQuantity,
-        match.inventoryId
+        saleMatch.inventoryId
       ]);
     } else {
-      await connection.execute("DELETE FROM inventory WHERE id = ?", [match.inventoryId]);
+      await connection.execute("DELETE FROM inventory WHERE id = ?", [saleMatch.inventoryId]);
     }
 
-    await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [match.productVariantId]);
-    await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [match.productId]);
+    await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [saleMatch.productVariantId]);
+    await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [saleMatch.productId]);
     await connection.commit();
 
     response.json({
       success: true,
-      message: "Product marked as sold successfully",
-      remaining_quantity: remainingQuantity
+      message: sale.openBoxIfNeeded ? "Box opened and product marked as sold successfully" : "Product marked as sold successfully",
+      remaining_quantity: remainingQuantity,
+      opened_box: sale.openBoxIfNeeded
     });
   } catch (error) {
     await connection.rollback();

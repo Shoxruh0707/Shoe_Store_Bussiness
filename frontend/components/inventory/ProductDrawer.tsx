@@ -2,16 +2,13 @@
 
 import { useState } from 'react';
 import { Product } from '@/lib/api';
-import { X, ChevronLeft, ChevronRight, Edit, Trash2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { STOCK_STATUS, LOW_STOCK_THRESHOLD } from '@/lib/constants';
 
 interface ProductDrawerProps {
   product: Product | null;
   isOpen: boolean;
   onClose: () => void;
-  onEdit: (product: Product) => void;
-  onDelete: (product: Product) => void;
-  canManageInventory?: boolean;
   canViewLandingPrice?: boolean;
 }
 
@@ -30,13 +27,9 @@ export function ProductDrawer({
   product,
   isOpen,
   onClose,
-  onEdit,
-  onDelete,
-  canManageInventory = true,
   canViewLandingPrice = true,
 }: ProductDrawerProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   if (!product) return null;
 
@@ -309,64 +302,8 @@ export function ProductDrawer({
             </div>
           </div>
 
-          {/* Footer Actions */}
-          {canManageInventory && (
-            <div className="border-t border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-800">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    onEdit(product);
-                    onClose();
-                  }}
-                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
-                >
-                  <Edit className="inline mr-1 h-4 w-4" />
-                  Edit
-                </button>
-                <button
-                  onClick={() => setShowDeleteConfirm(true)}
-                  className="flex-1 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-100 dark:border-red-700 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-900"
-                >
-                  <Trash2 className="inline mr-1 h-4 w-4" />
-                  Delete
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70">
-          <div className="mx-4 rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-              Delete Product?
-            </h3>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Are you sure you want to delete <span className="font-semibold">{product.name}</span>? This action cannot be undone.
-            </p>
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  onDelete(product);
-                  setShowDeleteConfirm(false);
-                  onClose();
-                }}
-                className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
