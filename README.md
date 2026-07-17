@@ -236,6 +236,8 @@ Expected tables include:
 
 - `users`
 - `store`
+- `store_users`
+- `seller_store_requests`
 - `brands`
 - `materials`
 - `shoe_type`
@@ -245,10 +247,8 @@ Expected tables include:
 - `product_variant`
 - `product_images`
 - `inventory`
-- `orders`
-- `order_items`
-- `payment_details`
-- `delivery`
+- `box_stock`
+- `sold_products`
 
 ## Backend Routes
 

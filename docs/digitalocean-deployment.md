@@ -94,6 +94,13 @@ Build and start every service:
 docker compose up -d --build
 ```
 
+Or use the deploy helper:
+
+```bash
+chmod +x scripts/deploy-digitalocean.sh
+APP_DIR=/opt/admin-shoe-store scripts/deploy-digitalocean.sh
+```
+
 Check status and logs:
 
 ```bash
@@ -130,7 +137,7 @@ one long-polling process should consume updates.
 ```bash
 cd /opt/admin-shoe-store
 git pull --ff-only
-docker compose up -d --build --remove-orphans
+scripts/deploy-digitalocean.sh
 ```
 
 ## MySQL Backup

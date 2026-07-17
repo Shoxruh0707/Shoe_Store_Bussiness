@@ -1,0 +1,5 @@
+let is add one more thing
+Let is make two tabs in the sold product page 
+one is for pair selling current page 
+next is box selling, same page but a little different logic and field 
+where there are still same fields but remove Size field from there, instead add a quantity, So it is a page where it will be sold by box where it should be decrement from the box, 
