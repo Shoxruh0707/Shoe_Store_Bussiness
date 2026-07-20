@@ -3,6 +3,7 @@ require("dotenv").config();
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const { spawn } = require("child_process");
 const express = require("express");
 const { pool, testConnection } = require("./src/db");
 
@@ -51,6 +52,14 @@ const SEASON_DB_VALUES = {
 const SIZES = ["33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44"];
 const UPLOAD_DIR = path.join(__dirname, "public", "uploads");
 const TEMP_UPLOAD_DIR = path.join(UPLOAD_DIR, "temp");
+const REMBG_UPLOAD_DIR = path.join(UPLOAD_DIR, "rembg");
+const rembgEnabled = process.env.REMBG_ENABLED !== "false";
+const defaultRembgPython = process.platform === "win32"
+  ? path.join(".venv", "Scripts", "python.exe")
+  : path.join(".venv", "bin", "python");
+const rembgPython = cleanText(process.env.REMBG_PYTHON || defaultRembgPython);
+const rembgScript = cleanText(process.env.REMBG_SCRIPT || path.join("scripts", "remove_background.py"));
+const rembgTimeoutMs = Number(process.env.REMBG_TIMEOUT_MS || 120000);
 const IMAGE_MIME_EXTENSIONS = {
   "image/jpeg": ".jpg",
   "image/png": ".png",
@@ -106,6 +115,7 @@ function buildCorsOrigins() {
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
+fs.mkdirSync(REMBG_UPLOAD_DIR, { recursive: true });
 
 const PAGE_PATHS = new Set(["/", "/inventory"]);
 
@@ -471,6 +481,173 @@ async function promoteTempImageFile(tempId) {
   return `/uploads/${fileName}`;
 }
 
+function uploadLocalPathFromPublicPath(publicPath) {
+  const normalizedPath = cleanText(publicPath).replace(/\\/g, "/");
+  if (!normalizedPath.startsWith("/uploads/")) {
+    throw new Error("Image path is not an upload path.");
+  }
+
+  const relativePath = normalizedPath.slice("/uploads/".length);
+  const resolvedPath = path.resolve(UPLOAD_DIR, relativePath);
+  const uploadRoot = path.resolve(UPLOAD_DIR);
+
+  if (resolvedPath !== uploadRoot && !resolvedPath.startsWith(`${uploadRoot}${path.sep}`)) {
+    throw new Error("Image path is outside upload directory.");
+  }
+
+  return resolvedPath;
+}
+
+const backgroundRemovalQueue = [];
+let isBackgroundRemovalRunning = false;
+let productImageProcessedColumnPromise = null;
+
+function projectPath(value) {
+  return path.isAbsolute(value) ? value : path.join(__dirname, value);
+}
+
+async function productImageProcessedColumn() {
+  if (!productImageProcessedColumnPromise) {
+    productImageProcessedColumnPromise = (async () => {
+      if (await columnExists("product_images", "isProcessed")) return "isProcessed";
+      if (await columnExists("product_images", "isprocesed")) return "isprocesed";
+      return "";
+    })();
+  }
+
+  const columnName = await productImageProcessedColumnPromise;
+  if (!columnName) {
+    productImageProcessedColumnPromise = null;
+  }
+
+  return columnName;
+}
+
+function runRembg(sourcePath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(projectPath(rembgPython), [projectPath(rembgScript), sourcePath, outputPath], {
+      windowsHide: true
+    });
+    let stderr = "";
+    let stdout = "";
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`rembg timed out after ${rembgTimeoutMs}ms`));
+    }, rembgTimeoutMs);
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(stderr || stdout || `rembg exited with code ${code}`));
+    });
+  });
+}
+
+async function processProductImageWithRembg(imageRecord) {
+  if (!imageRecord.id) return;
+
+  const processedColumn = await productImageProcessedColumn();
+  const [imageRows] = await pool.execute(
+    `SELECT image_path AS path${processedColumn ? `, \`${processedColumn}\` AS isProcessed` : ""}
+     FROM product_images
+     WHERE id = ?
+     LIMIT 1`,
+    [imageRecord.id]
+  );
+
+  if (!imageRows.length) return;
+
+  const imageRow = imageRows[0];
+  const originalPath = cleanText(imageRow.path);
+  if (!originalPath) return;
+
+  const isProcessed = Boolean(Number(imageRow.isProcessed || 0));
+  if (isProcessed) return;
+
+  if (originalPath.startsWith("/uploads/rembg/")) {
+    if (processedColumn) {
+      await pool.execute(`UPDATE product_images SET \`${processedColumn}\` = TRUE WHERE id = ?`, [imageRecord.id]);
+    }
+    return;
+  }
+
+  const sourcePath = uploadLocalPathFromPublicPath(originalPath);
+  await fs.promises.access(sourcePath, fs.constants.R_OK);
+
+  const fileName = `${Date.now()}-${crypto.randomUUID()}.png`;
+  const processedPath = path.join(REMBG_UPLOAD_DIR, fileName);
+  const publicProcessedPath = `/uploads/rembg/${fileName}`;
+
+  await runRembg(sourcePath, processedPath);
+
+  const stats = await fs.promises.stat(processedPath);
+  if (!stats.size) {
+    await fs.promises.unlink(processedPath).catch(() => {});
+    throw new Error("rembg returned an empty image.");
+  }
+
+  const [updated] = processedColumn
+    ? await pool.execute(
+        `UPDATE product_images
+         SET image_path = ?, \`${processedColumn}\` = TRUE
+         WHERE id = ? AND image_path = ? AND \`${processedColumn}\` = FALSE`,
+        [publicProcessedPath, imageRecord.id, originalPath]
+      )
+    : await pool.execute(
+        "UPDATE product_images SET image_path = ? WHERE id = ? AND image_path = ?",
+        [publicProcessedPath, imageRecord.id, originalPath]
+      );
+
+  if (!updated.affectedRows) {
+    await fs.promises.unlink(processedPath).catch(() => {});
+  }
+}
+
+async function runBackgroundRemovalQueue() {
+  if (isBackgroundRemovalRunning) return;
+  isBackgroundRemovalRunning = true;
+
+  try {
+    while (backgroundRemovalQueue.length) {
+      const imageRecord = backgroundRemovalQueue.shift();
+      try {
+        await processProductImageWithRembg(imageRecord);
+      } catch (error) {
+        console.error(`rembg image processing failed for image ${imageRecord?.id}: ${error.message}`);
+      }
+    }
+  } finally {
+    isBackgroundRemovalRunning = false;
+  }
+}
+
+function queueBackgroundRemovalProcessing(imageRecords) {
+  if (!rembgEnabled || !rembgPython || !rembgScript || !imageRecords.length) return;
+
+  const pendingImages = imageRecords.filter((imageRecord) => !imageRecord.isProcessed);
+  if (!pendingImages.length) return;
+
+  backgroundRemovalQueue.push(...pendingImages);
+  setTimeout(() => {
+    runBackgroundRemovalQueue().catch((error) => {
+      console.error(`Background removal queue failed: ${error.message}`);
+    });
+  }, 0).unref();
+}
+
 function validateProductPayload(payload) {
   const artNo = cleanText(payload.artNo);
   const name = cleanText(payload.name);
@@ -514,14 +691,30 @@ function validateProductPayload(payload) {
 }
 
 async function saveProductImages(connection, variantId, images) {
+  const savedImages = [];
+  const processedColumn = await productImageProcessedColumn();
+
   for (const image of images) {
     const imagePath = image.tempId ? await promoteTempImageFile(image.tempId) : await saveImageFile(image);
 
-    await connection.execute("INSERT INTO product_images (product_variant_id, image_path) VALUES (?, ?)", [
-      variantId,
-      imagePath
-    ]);
+    const [insert] = processedColumn
+      ? await connection.execute(
+          `INSERT INTO product_images (product_variant_id, image_path, \`${processedColumn}\`) VALUES (?, ?, FALSE)`,
+          [variantId, imagePath]
+        )
+      : await connection.execute("INSERT INTO product_images (product_variant_id, image_path) VALUES (?, ?)", [
+          variantId,
+          imagePath
+        ]);
+
+    savedImages.push({
+      id: insert.insertId,
+      path: imagePath,
+      isProcessed: false
+    });
   }
+
+  return savedImages;
 }
 
 async function removeArtNoUniqueIndexes() {
@@ -2165,9 +2358,10 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
         [data.price, data.landingPrice, existing.variantId]
       );
       await addStockRowsForProduct(connection, existing.variantId, data.inventory, storeId, data.boxQuantity);
-      await saveProductImages(connection, existing.variantId, data.images);
+      const savedImages = await saveProductImages(connection, existing.variantId, data.images);
       await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [existing.productId]);
       await connection.commit();
+      queueBackgroundRemovalProcessing(savedImages);
 
       apiData(response, {
         ...(await fetchProduct(existing.productId, storeId, existing.variantId)),
@@ -2191,8 +2385,9 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
       );
       await writeProductSeasons(connection, existingProduct.productId, data.seasons);
       await writeStockRowsForProduct(connection, variantInsert.insertId, data.inventory, storeId, data.boxQuantity);
-      await saveProductImages(connection, variantInsert.insertId, data.images);
+      const savedImages = await saveProductImages(connection, variantInsert.insertId, data.images);
       await connection.commit();
+      queueBackgroundRemovalProcessing(savedImages);
 
       apiData(response, await fetchProduct(existingProduct.productId, storeId, variantInsert.insertId), 201);
       return;
@@ -2211,8 +2406,9 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
 
     await writeProductSeasons(connection, productInsert.insertId, data.seasons);
     await writeStockRowsForProduct(connection, variantInsert.insertId, data.inventory, storeId, data.boxQuantity);
-    await saveProductImages(connection, variantInsert.insertId, data.images);
+    const savedImages = await saveProductImages(connection, variantInsert.insertId, data.images);
     await connection.commit();
+    queueBackgroundRemovalProcessing(savedImages);
 
     apiData(response, await fetchProduct(productInsert.insertId, storeId), 201);
   } catch (error) {
@@ -2285,8 +2481,9 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
 
     await writeProductSeasons(connection, productId, data.seasons);
     await writeInventoryRows(connection, variantId, data.inventory, storeId);
-    await saveProductImages(connection, variantId, data.images);
+    const savedImages = await saveProductImages(connection, variantId, data.images);
     await connection.commit();
+    queueBackgroundRemovalProcessing(savedImages);
 
     apiData(response, await fetchProduct(productId, storeId, variantId));
   } catch (error) {
