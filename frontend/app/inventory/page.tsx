@@ -9,8 +9,9 @@ import { ProductTable } from '@/components/inventory/ProductTable';
 import { ProductDrawer } from '@/components/inventory/ProductDrawer';
 import { AddProductModal } from '@/components/inventory/AddProductModal';
 import { SoldProductModal } from '@/components/inventory/SoldProductModal';
+import { PriceUpdateModal } from '@/components/inventory/PriceUpdateModal';
 import { SoldProductPayload } from '@/lib/api';
-import { BarChart3, Plus, ShoppingBag } from 'lucide-react';
+import { BarChart3, DollarSign, Plus, ShoppingBag } from 'lucide-react';
 
 export default function InventoryPage() {
   const {
@@ -20,6 +21,7 @@ export default function InventoryPage() {
     error,
     createProduct,
     updateProduct,
+    updateProductPrices,
     markProductSold,
   } = useProducts();
 
@@ -29,6 +31,7 @@ export default function InventoryPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSoldModalOpen, setIsSoldModalOpen] = useState(false);
+  const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saleMessage, setSaleMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -62,11 +65,26 @@ export default function InventoryPage() {
       }
 
       if (!savedProduct) {
-        throw new Error('Product could not be saved. Check the fields and try again.');
+        throw new Error('Mahsulot saqlanmadi. Maydonlarni tekshirib qayta urinib ko\'ring.');
       }
 
       setEditingProduct(null);
       setIsAddModalOpen(false);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePriceUpdate = async (payload: Parameters<typeof updateProductPrices>[0]) => {
+    setIsSubmitting(true);
+    setSaleMessage(null);
+
+    try {
+      const saved = await updateProductPrices(payload);
+      if (saved) {
+        setSaleMessage({ type: 'success', text: 'Narxlar muvaffaqiyatli yangilandi.' });
+      }
+      return saved;
     } finally {
       setIsSubmitting(false);
     }
@@ -80,14 +98,14 @@ export default function InventoryPage() {
     try {
       const result = await markProductSold(payload);
       if (!result) {
-        throw new Error('Product could not be marked as sold. Check the fields and try again.');
+        throw new Error('Mahsulot sotilgan deb belgilanmadi. Maydonlarni tekshirib qayta urinib ko\'ring.');
       }
 
-      const message = `${result.message}. Remaining quantity: ${result.remaining_quantity}`;
+      const message = `${result.message}. Qolgan miqdor: ${result.remaining_quantity}`;
       setSaleMessage({ type: 'success', text: message });
       return message;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to mark product as sold.';
+      const message = error instanceof Error ? error.message : 'Mahsulotni sotilgan deb belgilab bo\'lmadi.';
       if ((error as any)?.requiresBoxOpen) {
         throw error;
       }
@@ -107,10 +125,10 @@ export default function InventoryPage() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-                Inventory
+                Inventar
               </h1>
               <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                Manage your shoe products and stock levels
+                Mahsulotlar va ombor qoldiqlarini boshqaring
               </p>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
@@ -120,7 +138,7 @@ export default function InventoryPage() {
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 <BarChart3 className="h-4 w-4" />
-                Analytics
+                Tahlil
               </Link>
               {/* New sold-product analytics page code ends. */}
               {/* New sold-product feature code starts. */}
@@ -132,8 +150,20 @@ export default function InventoryPage() {
                 className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700"
               >
                 <ShoppingBag className="h-4 w-4" />
-                Sold Product
+                Sotilgan mahsulot
               </button>
+              {canManageInventory && (
+                <button
+                  onClick={() => {
+                    setSaleMessage(null);
+                    setIsPriceModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600"
+                >
+                  <DollarSign className="h-4 w-4" />
+                  Narxni yangilash
+                </button>
+              )}
               {/* New sold-product feature code ends. */}
               {canManageInventory && (
                 <button
@@ -144,7 +174,7 @@ export default function InventoryPage() {
                   className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
                 >
                   <Plus className="h-4 w-4" />
-                  Add Product
+                  Mahsulot qo'shish
                 </button>
               )}
             </div>
@@ -156,7 +186,7 @@ export default function InventoryPage() {
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {error && (
           <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950 dark:text-red-200">
-            <p className="font-medium">Error loading inventory</p>
+            <p className="font-medium">Inventarni yuklashda xatolik</p>
             <p className="mt-1">{error}</p>
           </div>
         )}
@@ -170,7 +200,7 @@ export default function InventoryPage() {
                 : 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200'
             }`}
           >
-            <p className="font-medium">{saleMessage.type === 'success' ? 'Sale saved' : 'Sale failed'}</p>
+            <p className="font-medium">{saleMessage.type === 'success' ? 'Amal saqlandi' : 'Amal bajarilmadi'}</p>
             <p className="mt-1">{saleMessage.text}</p>
           </div>
         )}
@@ -219,6 +249,13 @@ export default function InventoryPage() {
         onSubmit={handleSoldProduct}
         metadata={metadata}
         products={products}
+        isSubmitting={isSubmitting}
+      />
+
+      <PriceUpdateModal
+        isOpen={isPriceModalOpen}
+        onClose={() => setIsPriceModalOpen(false)}
+        onSubmit={handlePriceUpdate}
         isSubmitting={isSubmitting}
       />
       {/* New sold-product feature code ends. */}

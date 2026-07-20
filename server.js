@@ -234,6 +234,12 @@ function parsePositiveNumber(value) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
+function parseOptionalPrice(value) {
+  const text = cleanText(value);
+  if (!text) return undefined;
+  return parsePositiveNumber(text);
+}
+
 function parseNonNegativeInteger(value) {
   const text = cleanText(value);
   if (!/^\d+$/.test(text)) return null;
@@ -324,6 +330,10 @@ function inventoryFromSizeRange(sizeRange) {
     size,
     quantity: quantitiesBySize.get(size) || 0
   })).filter((row) => row.quantity > 0);
+}
+
+function pairCountFromSizeRange(sizeRange) {
+  return inventoryFromSizeRange(sizeRange).reduce((total, row) => total + row.quantity, 0);
 }
 
 function inventoryForClient(rows) {
@@ -532,125 +542,243 @@ async function removeArtNoUniqueIndexes() {
 }
 
 // New sold-product feature code starts.
-async function ensureSoldProductsTable() {
+async function tableExists(tableName) {
+  const [rows] = await pool.execute(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+     LIMIT 1`,
+    [tableName]
+  );
+
+  return rows.length > 0;
+}
+
+async function columnExists(tableName, columnName) {
+  const [rows] = await pool.execute(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = ?
+     LIMIT 1`,
+    [tableName, columnName]
+  );
+
+  return rows.length > 0;
+}
+
+async function ensureIndex(tableName, indexName, columnName) {
+  const [existing] = await pool.execute(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND INDEX_NAME = ?
+     LIMIT 1`,
+    [tableName, indexName]
+  );
+
+  if (!existing.length) {
+    await pool.query(`CREATE INDEX \`${indexName}\` ON \`${tableName}\`(\`${columnName}\`)`);
+  }
+}
+
+async function ensureBooleanColumn(tableName, columnName, defaultValue = false) {
+  if (await columnExists(tableName, columnName)) return;
+
+  await pool.query(
+    `ALTER TABLE \`${tableName}\`
+     ADD COLUMN \`${columnName}\` BOOLEAN NOT NULL DEFAULT ${defaultValue ? "TRUE" : "FALSE"}`
+  );
+}
+
+async function ensureSoldProductsTables() {
   await pool.execute(
-    `CREATE TABLE IF NOT EXISTS sold_products (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      store_id INT NOT NULL,
-      user_id INT NOT NULL,
-      product_variant_id INT NOT NULL,
+    `CREATE TABLE IF NOT EXISTS sold_products_pair (
+      id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      store_id INT UNSIGNED NOT NULL,
+      seller_user_id INT UNSIGNED NOT NULL,
+      product_variant_id INT UNSIGNED NOT NULL,
       size ENUM('33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44') NOT NULL,
+      sold_price DECIMAL(10,2) NOT NULL,
+      landing_price DECIMAL(10,2) NOT NULL,
+      sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      isCanceled BOOLEAN NOT NULL DEFAULT FALSE,
+
+      CONSTRAINT fk_sold_products_pair_store
+        FOREIGN KEY (store_id) REFERENCES store(id)
+        ON UPDATE CASCADE,
+
+      CONSTRAINT fk_sold_products_pair_user
+        FOREIGN KEY (seller_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE,
+
+      CONSTRAINT fk_sold_products_pair_variant
+        FOREIGN KEY (product_variant_id) REFERENCES product_variant(id)
+        ON UPDATE CASCADE,
+
+      CONSTRAINT chk_sold_products_pair_price
+        CHECK (sold_price >= 0)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+  );
+
+  await pool.execute(
+    `CREATE TABLE IF NOT EXISTS sold_products_box (
+      id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      store_id INT UNSIGNED NOT NULL,
+      seller_user_id INT UNSIGNED NOT NULL,
+      box_stock_id INT UNSIGNED NOT NULL,
       quantity INT NOT NULL DEFAULT 1,
       sold_price DECIMAL(10,2) NOT NULL,
-      landing_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+      landing_price DECIMAL(10,2) NOT NULL,
       sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      isCancelled BOOLEAN NOT NULL DEFAULT FALSE,
 
-      CONSTRAINT fk_sold_products_store
+      CONSTRAINT fk_sold_products_box_store
         FOREIGN KEY (store_id) REFERENCES store(id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
+        ON UPDATE CASCADE,
 
-      CONSTRAINT fk_sold_products_user
-        FOREIGN KEY (user_id) REFERENCES users(id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
+      CONSTRAINT fk_sold_products_box_user
+        FOREIGN KEY (seller_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE,
 
-      CONSTRAINT fk_sold_products_variant
-        FOREIGN KEY (product_variant_id) REFERENCES product_variant(id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
+      CONSTRAINT fk_sold_products_box_stock
+        FOREIGN KEY (box_stock_id) REFERENCES box_stock(id)
+        ON UPDATE CASCADE,
 
-      CONSTRAINT chk_sold_products_quantity
+      CONSTRAINT chk_sold_products_box_quantity
         CHECK (quantity > 0),
 
-      CONSTRAINT chk_sold_products_price
+      CONSTRAINT chk_sold_products_box_price
         CHECK (sold_price >= 0),
 
-      CONSTRAINT chk_sold_products_landing_price
+      CONSTRAINT chk_sold_products_box_landing_price
         CHECK (landing_price >= 0)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
   );
 
-  const [landingPriceColumns] = await pool.execute(
-    `SELECT 1
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'sold_products'
-       AND COLUMN_NAME = 'landing_price'
-     LIMIT 1`
-  );
-
-  if (!landingPriceColumns.length) {
-    await pool.query(
-      "ALTER TABLE sold_products ADD COLUMN landing_price DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER sold_price"
-    );
-  }
-
-  const [landingPriceChecks] = await pool.execute(
-    `SELECT 1
-     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
-     WHERE CONSTRAINT_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'sold_products'
-       AND CONSTRAINT_NAME = 'chk_sold_products_landing_price'
-       AND CONSTRAINT_TYPE = 'CHECK'
-     LIMIT 1`
-  );
-
-  if (!landingPriceChecks.length) {
-    await pool.query(
-      "ALTER TABLE sold_products ADD CONSTRAINT chk_sold_products_landing_price CHECK (landing_price >= 0)"
-    );
-  }
-
-  const indexes = [
-    ["idx_sold_products_store_id", "store_id"],
-    ["idx_sold_products_user_id", "user_id"],
-    ["idx_sold_products_product_variant_id", "product_variant_id"],
-    ["idx_sold_products_sold_at", "sold_at"]
+  const pairIndexes = [
+    ["idx_sold_products_pair_store_id", "store_id"],
+    ["idx_sold_products_pair_seller_user_id", "seller_user_id"],
+    ["idx_sold_products_pair_product_variant_id", "product_variant_id"],
+    ["idx_sold_products_pair_sold_at", "sold_at"]
   ];
 
-  for (const [indexName, columnName] of indexes) {
-    const [existing] = await pool.execute(
-      `SELECT 1
-       FROM INFORMATION_SCHEMA.STATISTICS
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = 'sold_products'
-         AND INDEX_NAME = ?
-       LIMIT 1`,
-      [indexName]
-    );
+  for (const [indexName, columnName] of pairIndexes) {
+    await ensureIndex("sold_products_pair", indexName, columnName);
+  }
 
-    if (!existing.length) {
-      await pool.query(`CREATE INDEX \`${indexName}\` ON sold_products(\`${columnName}\`)`);
-    }
+  const boxIndexes = [
+    ["idx_sold_products_box_store_id", "store_id"],
+    ["idx_sold_products_box_seller_user_id", "seller_user_id"],
+    ["idx_sold_products_box_box_stock_id", "box_stock_id"],
+    ["idx_sold_products_box_sold_at", "sold_at"]
+  ];
+
+  for (const [indexName, columnName] of boxIndexes) {
+    await ensureIndex("sold_products_box", indexName, columnName);
+  }
+
+  await ensureBooleanColumn("sold_products_pair", "isCancelled", false);
+  await ensureBooleanColumn("sold_products_box", "isCancelled", false);
+
+  if (await tableExists("sold_products")) {
+    const legacyLandingPrice = (await columnExists("sold_products", "landing_price"))
+      ? "COALESCE(sp.landing_price, 0.00)"
+      : "0.00";
+
+    await pool.query(
+      `INSERT INTO sold_products_pair
+         (store_id, seller_user_id, product_variant_id, size, sold_price, landing_price, sold_at)
+       SELECT
+         sp.store_id,
+         sp.user_id,
+         sp.product_variant_id,
+         sp.size,
+         sp.sold_price,
+         ${legacyLandingPrice},
+         sp.sold_at
+       FROM sold_products sp
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM sold_products_pair spp
+         WHERE spp.store_id = sp.store_id
+           AND spp.seller_user_id = sp.user_id
+           AND spp.product_variant_id = sp.product_variant_id
+           AND spp.size = sp.size
+           AND spp.sold_price = sp.sold_price
+           AND spp.landing_price = ${legacyLandingPrice}
+           AND spp.sold_at = sp.sold_at
+       )`
+    );
   }
 }
 
 function validateSoldProductPayload(payload) {
+  const saleType = cleanText(payload?.sale_type || "pair").toLowerCase();
   const artNo = cleanText(payload?.art_no);
   const colourName = cleanText(payload?.colour_name);
   const materialType = cleanText(payload?.material_type);
   const size = cleanText(payload?.size);
   const soldPrice = parseNonNegativeDecimal(payload?.sold_price);
+  const pairPrice = parseNonNegativeDecimal(payload?.pair_price);
+  const boxPrice = parseNonNegativeDecimal(payload?.box_price ?? payload?.sold_price);
   const quantity = Number(payload?.quantity || 1);
+  const boxStockId = Number(payload?.box_stock_id || 0);
   const openBoxIfNeeded = payload?.open_box_if_needed === true;
 
-  if (!artNo) return { error: "Art number is required." };
-  if (!colourName) return { error: "Color is required." };
-  if (!materialType) return { error: "Material type is required." };
-  if (!SIZES.includes(size)) return { error: "Valid size is required." };
-  if (soldPrice === null) return { error: "Sold price must be a valid number greater than or equal to 0." };
-  if (!Number.isInteger(quantity) || quantity <= 0) return { error: "Quantity sold must be a positive whole number." };
+  if (!["pair", "box"].includes(saleType)) return { error: "Sotuv turi to'g'ri kiritilishi kerak." };
+  if (!artNo) return { error: "Art no kiritilishi kerak." };
+  if (!colourName) return { error: "Rang kiritilishi kerak." };
+  if (!materialType) return { error: "Material turi kiritilishi kerak." };
+  if (!Number.isInteger(quantity) || quantity <= 0) return { error: "Sotilgan son musbat butun son bo'lishi kerak." };
+
+  if (saleType === "pair") {
+    if (!SIZES.includes(size)) return { error: "To'g'ri razmer kiritilishi kerak." };
+    if (soldPrice === null) return { error: "Sotilgan narx 0 yoki undan katta son bo'lishi kerak." };
+  }
+
+  if (saleType === "box") {
+    if (pairPrice === null) return { error: "Bir juft narxi 0 yoki undan katta son bo'lishi kerak." };
+    if (boxPrice === null) return { error: "Butun quti narxi 0 yoki undan katta son bo'lishi kerak." };
+  }
 
   return {
     sale: {
+      saleType,
       artNo,
       colourName,
       materialType,
       size,
       soldPrice,
+      pairPrice,
+      boxPrice,
       quantity,
+      boxStockId,
       openBoxIfNeeded
+    }
+  };
+}
+
+function validatePriceUpdatePayload(payload) {
+  const artNo = cleanText(payload?.artNo ?? payload?.art_no);
+  const landingPrice = parseOptionalPrice(payload?.landingPriceUpdate ?? payload?.landing_price_update);
+  const sellingPrice = parseOptionalPrice(payload?.sellingPrice ?? payload?.selling_price);
+
+  if (!artNo) return { error: "Art no kiritilishi kerak." };
+  if (landingPrice === null) return { error: "Kelish narxi 0 yoki undan katta son bo'lishi kerak." };
+  if (sellingPrice === null) return { error: "Sotish narxi 0 yoki undan katta son bo'lishi kerak." };
+  if (landingPrice === undefined && sellingPrice === undefined) {
+    return { error: "Kamida bitta narx maydonini to'ldiring." };
+  }
+
+  return {
+    priceUpdate: {
+      artNo,
+      landingPrice,
+      sellingPrice
     }
   };
 }
@@ -893,7 +1021,7 @@ function productForClient(request, product) {
   };
 }
 
-async function writeInventoryRows(connection, variantId, price, inventory, storeId) {
+async function writeInventoryRows(connection, variantId, inventory, storeId) {
   await connection.execute("DELETE FROM inventory WHERE product_variant_id = ? AND store_id = ?", [variantId, storeId]);
 
   const rowsToInsert = inventory.filter((row) => row.quantity > 0);
@@ -903,8 +1031,8 @@ async function writeInventoryRows(connection, variantId, price, inventory, store
 
   for (const row of rowsToInsert) {
     await connection.execute(
-      "INSERT INTO inventory (product_variant_id, size, quantity, store_id, price) VALUES (?, ?, ?, ?, ?)",
-      [variantId, row.size, row.quantity, storeId, price]
+      "INSERT INTO inventory (product_variant_id, size, quantity, store_id) VALUES (?, ?, ?, ?)",
+      [variantId, row.size, row.quantity, storeId]
     );
   }
 }
@@ -917,7 +1045,7 @@ async function writeProductSeasons(connection, productId, seasons) {
   }
 }
 
-async function addInventoryRows(connection, variantId, price, inventory, storeId) {
+async function addInventoryRows(connection, variantId, inventory, storeId) {
   const rowsToAdd = inventory.filter((row) => row.quantity > 0);
   if (!rowsToAdd.length) return;
 
@@ -928,15 +1056,15 @@ async function addInventoryRows(connection, variantId, price, inventory, storeId
   for (const row of rowsToAdd) {
     const [updated] = await connection.execute(
       `UPDATE inventory
-       SET quantity = quantity + ?, price = ?
+       SET quantity = quantity + ?
        WHERE product_variant_id = ? AND store_id = ? AND size = ?`,
-      [row.quantity, price, variantId, storeId, row.size]
+      [row.quantity, variantId, storeId, row.size]
     );
 
     if (!updated.affectedRows) {
       await connection.execute(
-        "INSERT INTO inventory (product_variant_id, size, quantity, store_id, price) VALUES (?, ?, ?, ?, ?)",
-        [variantId, row.size, row.quantity, storeId, price]
+        "INSERT INTO inventory (product_variant_id, size, quantity, store_id) VALUES (?, ?, ?, ?)",
+        [variantId, row.size, row.quantity, storeId]
       );
     }
   }
@@ -949,6 +1077,7 @@ async function ensureBoxStockTable() {
       product_variant_id INT NOT NULL,
       size_range VARCHAR(255) NOT NULL,
       quantity INT NOT NULL DEFAULT 0,
+      store_id INT NOT NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -957,34 +1086,54 @@ async function ensureBoxStockTable() {
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
 
+      CONSTRAINT fk_box_stock_store
+        FOREIGN KEY (store_id) REFERENCES store(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
       CONSTRAINT chk_box_stock_quantity
         CHECK (quantity >= 0)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
   );
 
+  if (!(await columnExists("box_stock", "store_id"))) {
+    await ensureDefaultStore(pool);
+    await pool.query(`ALTER TABLE box_stock ADD COLUMN store_id INT NULL AFTER quantity`);
+    await pool.query("UPDATE box_stock SET store_id = ? WHERE store_id IS NULL", [defaultStoreId]);
+    await pool.query(`ALTER TABLE box_stock MODIFY store_id INT NOT NULL`);
+  }
+
+  const [storeForeignKeys] = await pool.execute(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'box_stock'
+       AND CONSTRAINT_NAME = 'fk_box_stock_store'
+     LIMIT 1`
+  );
+
+  if (!storeForeignKeys.length) {
+    await pool.query(
+      `ALTER TABLE box_stock
+       ADD CONSTRAINT fk_box_stock_store
+         FOREIGN KEY (store_id) REFERENCES store(id)
+         ON UPDATE CASCADE
+         ON DELETE RESTRICT`
+    );
+  }
+
   const indexes = [
     ["idx_box_stock_product_variant_id", "product_variant_id"],
+    ["idx_box_stock_store_id", "store_id"],
     ["idx_box_stock_quantity", "quantity"]
   ];
 
   for (const [indexName, columnName] of indexes) {
-    const [existing] = await pool.execute(
-      `SELECT 1
-       FROM INFORMATION_SCHEMA.STATISTICS
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = 'box_stock'
-         AND INDEX_NAME = ?
-       LIMIT 1`,
-      [indexName]
-    );
-
-    if (!existing.length) {
-      await pool.query(`CREATE INDEX \`${indexName}\` ON box_stock(\`${columnName}\`)`);
-    }
+    await ensureIndex("box_stock", indexName, columnName);
   }
 }
 
-async function writeBoxStockRow(connection, variantId, inventory, boxQuantity) {
+async function writeBoxStockRow(connection, variantId, inventory, boxQuantity, storeId) {
   if (boxQuantity <= 0) return;
 
   const sizeRange = sizeRangeFromInventory(inventory);
@@ -993,70 +1142,72 @@ async function writeBoxStockRow(connection, variantId, inventory, boxQuantity) {
   }
 
   await connection.execute(
-    "INSERT INTO box_stock (product_variant_id, size_range, quantity) VALUES (?, ?, ?)",
-    [variantId, sizeRange, boxQuantity]
+    "INSERT INTO box_stock (product_variant_id, size_range, quantity, store_id) VALUES (?, ?, ?, ?)",
+    [variantId, sizeRange, boxQuantity, storeId]
   );
 }
 
-async function writeStockRowsForProduct(connection, variantId, price, inventory, storeId, boxQuantity) {
+async function writeStockRowsForProduct(connection, variantId, inventory, storeId, boxQuantity) {
   if (boxQuantity > 0) {
-    await writeBoxStockRow(connection, variantId, inventory, boxQuantity);
+    await writeBoxStockRow(connection, variantId, inventory, boxQuantity, storeId);
     return;
   }
 
-  await writeInventoryRows(connection, variantId, price, inventory, storeId);
+  await writeInventoryRows(connection, variantId, inventory, storeId);
 }
 
-async function addStockRowsForProduct(connection, variantId, price, inventory, storeId, boxQuantity) {
+async function addStockRowsForProduct(connection, variantId, inventory, storeId, boxQuantity) {
   if (boxQuantity > 0) {
-    await writeBoxStockRow(connection, variantId, inventory, boxQuantity);
+    await writeBoxStockRow(connection, variantId, inventory, boxQuantity, storeId);
     return;
   }
 
-  await addInventoryRows(connection, variantId, price, inventory, storeId);
+  await addInventoryRows(connection, variantId, inventory, storeId);
 }
 
 function inventoryIncludesSize(inventory, size) {
   return inventory.some((row) => row.size === size && row.quantity > 0);
 }
 
-async function findSaleVariant(connection, sale) {
+async function findSaleVariant(connection, sale, storeId) {
   const [matches] = await connection.execute(
     `SELECT
        p.id AS productId,
-       p.price,
-       p.landing_price AS landingPrice,
+       pv.price,
+       pv.landing_price AS landingPrice,
        pv.id AS productVariantId
      FROM products p
      INNER JOIN product_variant pv ON pv.product_id = p.id
      INNER JOIN colours c ON c.id = pv.colour_id
      INNER JOIN materials m ON m.id = pv.material_id
      WHERE p.art_no = ?
+       AND pv.store_id = ?
        AND c.colour_name = ?
        AND m.material_type = ?
      ORDER BY p.updated_at DESC, p.created_at DESC
      LIMIT 1`,
-    [sale.artNo, sale.colourName, sale.materialType]
+    [sale.artNo, storeId, sale.colourName, sale.materialType]
   );
 
   return matches[0] || null;
 }
 
-async function findOpenableBoxStock(connection, variantId, size, lock = false) {
+async function findOpenableBoxStock(connection, variantId, size, storeId, lock = false) {
   const [boxes] = await connection.execute(
     `SELECT id, product_variant_id AS productVariantId, size_range AS sizeRange, quantity
      FROM box_stock
      WHERE product_variant_id = ?
+       AND store_id = ?
        AND quantity > 0
      ORDER BY id
      ${lock ? "FOR UPDATE" : ""}`,
-    [variantId]
+    [variantId, storeId]
   );
 
   return boxes.find((box) => inventoryIncludesSize(inventoryFromSizeRange(box.sizeRange), size)) || null;
 }
 
-async function openBoxStockInTransaction(connection, boxStock, storeId, price) {
+async function openBoxStockInTransaction(connection, boxStock, storeId) {
   if (!boxStock || Number(boxStock.quantity) <= 0) {
     throw Object.assign(new Error("No unopened boxes are available."), { statusCode: 400 });
   }
@@ -1066,13 +1217,13 @@ async function openBoxStockInTransaction(connection, boxStock, storeId, price) {
   await connection.execute("UPDATE box_stock SET quantity = quantity - 1, updated_at = NOW() WHERE id = ?", [
     boxStock.id
   ]);
-  await addInventoryRows(connection, boxStock.productVariantId, price, inventory, storeId);
+  await addInventoryRows(connection, boxStock.productVariantId, inventory, storeId);
   await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [boxStock.productVariantId]);
 
   return inventory;
 }
 
-async function openBoxStock(boxStockId, storeId = defaultStoreId, priceOverride = null) {
+async function openBoxStock(boxStockId, storeId = defaultStoreId) {
   const connection = await pool.getConnection();
 
   try {
@@ -1084,13 +1235,14 @@ async function openBoxStock(boxStockId, storeId = defaultStoreId, priceOverride 
          bs.product_variant_id AS productVariantId,
          bs.size_range AS sizeRange,
          bs.quantity,
-         p.price
+         pv.price
        FROM box_stock bs
        INNER JOIN product_variant pv ON pv.id = bs.product_variant_id
        INNER JOIN products p ON p.id = pv.product_id
        WHERE bs.id = ?
+         AND bs.store_id = ?
        FOR UPDATE`,
-      [boxStockId]
+      [boxStockId, storeId]
     );
 
     if (!boxStock) {
@@ -1101,13 +1253,12 @@ async function openBoxStock(boxStockId, storeId = defaultStoreId, priceOverride 
       throw Object.assign(new Error("No unopened boxes are available."), { statusCode: 400 });
     }
 
-    const price = priceOverride === null ? boxStock.price : priceOverride;
     const inventory = inventoryFromSizeRange(boxStock.sizeRange);
 
     await connection.execute("UPDATE box_stock SET quantity = quantity - 1, updated_at = NOW() WHERE id = ?", [
       boxStock.id
     ]);
-    await addInventoryRows(connection, boxStock.productVariantId, price, inventory, storeId);
+    await addInventoryRows(connection, boxStock.productVariantId, inventory, storeId);
     await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [boxStock.productVariantId]);
 
     await connection.commit();
@@ -1124,17 +1275,48 @@ async function openBoxStock(boxStockId, storeId = defaultStoreId, priceOverride 
   }
 }
 
-async function findMatchingProductVariant(connection, data, colourId, materialId) {
+async function findBoxStockForSale(connection, sale, storeId) {
+  const variant = await findSaleVariant(connection, sale, storeId);
+  if (!variant) return null;
+
+  const params = sale.boxStockId > 0 ? [sale.boxStockId, variant.productVariantId, storeId] : [variant.productVariantId, storeId];
+  const idFilter = sale.boxStockId > 0 ? "bs.id = ? AND" : "";
+  const [boxes] = await connection.execute(
+     `SELECT
+       bs.id,
+       bs.product_variant_id AS productVariantId,
+       bs.size_range AS sizeRange,
+       bs.quantity,
+       p.id AS productId,
+       pv.price,
+       pv.landing_price AS landingPrice
+     FROM box_stock bs
+     INNER JOIN product_variant pv ON pv.id = bs.product_variant_id
+     INNER JOIN products p ON p.id = pv.product_id
+     WHERE ${idFilter} bs.product_variant_id = ?
+       AND bs.store_id = ?
+       AND bs.quantity > 0
+     ORDER BY bs.id
+     LIMIT 1
+     FOR UPDATE`,
+    params
+  );
+
+  return boxes[0] || null;
+}
+
+async function findMatchingProductVariant(connection, data, colourId, materialId, storeId) {
   const [matches] = await connection.execute(
     `SELECT p.id AS productId, pv.id AS variantId
      FROM products p
      INNER JOIN product_variant pv ON pv.product_id = p.id
      WHERE p.art_no = ?
+       AND pv.store_id = ?
        AND pv.colour_id = ?
        AND pv.material_id = ?
      ORDER BY p.updated_at DESC, p.created_at DESC
      LIMIT 1`,
-    [data.artNo, colourId, materialId]
+    [data.artNo, storeId, colourId, materialId]
   );
 
   return matches[0] || null;
@@ -1153,19 +1335,20 @@ async function findProductByArtNo(connection, artNo) {
   return matches[0] || null;
 }
 
-async function findMatchingProductByText(artNo, colour, material) {
+async function findMatchingProductByText(artNo, colour, material, storeId = defaultStoreId) {
   const [matches] = await pool.execute(
-    `SELECT p.id AS productId
+    `SELECT p.id AS productId, pv.id AS variantId
      FROM products p
      INNER JOIN product_variant pv ON pv.product_id = p.id
      INNER JOIN colours c ON c.id = pv.colour_id
      INNER JOIN materials m ON m.id = pv.material_id
      WHERE p.art_no = ?
+       AND pv.store_id = ?
        AND c.colour_name = ?
        AND m.material_type = ?
      ORDER BY p.updated_at DESC, p.created_at DESC
      LIMIT 1`,
-    [artNo, colour, material]
+    [artNo, storeId, colour, material]
   );
 
   return matches[0] || null;
@@ -1179,10 +1362,10 @@ async function fetchProductLookupByArtNo(artNo, storeId = defaultStoreId) {
        p.name,
        st.type,
        (SELECT GROUP_CONCAT(ps.season ORDER BY ps.season SEPARATOR ',')
-        FROM product_seasons ps
+       FROM product_seasons ps
         WHERE ps.product_id = p.id) AS seasonValues,
-       p.landing_price AS landingPrice,
-       p.price,
+       pv.landing_price AS landingPrice,
+       pv.price,
        pv.id AS variantId,
        c.colour_name AS colour,
        m.material_type AS material,
@@ -1194,11 +1377,12 @@ async function fetchProductLookupByArtNo(artNo, storeId = defaultStoreId) {
      LEFT JOIN materials m ON m.id = pv.material_id
      LEFT JOIN inventory i ON i.product_variant_id = pv.id AND i.store_id = ?
      WHERE p.art_no = ?
+       AND pv.store_id = ?
      GROUP BY
-       p.id, p.art_no, p.name, st.type, p.landing_price, p.price,
+       p.id, p.art_no, p.name, st.type, pv.landing_price, pv.price,
        pv.id, c.colour_name, m.material_type
      ORDER BY p.updated_at DESC, p.created_at DESC, pv.updated_at DESC, pv.created_at DESC`,
-    [storeId, artNo]
+    [storeId, artNo, storeId]
   );
 
   if (!rows.length) return null;
@@ -1232,7 +1416,6 @@ async function fetchProductLookupByArtNo(artNo, storeId = defaultStoreId) {
 
 async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
   const variantFilter = variantId ? "AND pv.id = ?" : "";
-  const params = variantId ? [storeId, id, variantId] : [storeId, id];
   const [rows] = await pool.execute(
     `SELECT
        p.id,
@@ -1240,10 +1423,10 @@ async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
        p.name,
        st.type,
        (SELECT GROUP_CONCAT(ps.season ORDER BY ps.season SEPARATOR ',')
-        FROM product_seasons ps
+       FROM product_seasons ps
        WHERE ps.product_id = p.id) AS seasonValues,
-       p.landing_price AS landingPrice,
-       p.price,
+       pv.landing_price AS landingPrice,
+       pv.price,
        p.created_at AS createdAt,
        p.updated_at AS updatedAt,
        pv.id AS variantId,
@@ -1257,11 +1440,12 @@ async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
      LEFT JOIN materials m ON m.id = pv.material_id
      LEFT JOIN inventory i ON i.product_variant_id = pv.id AND i.store_id = ?
      WHERE p.id = ?
+       AND pv.store_id = ?
        ${variantFilter}
      GROUP BY
-       p.id, p.art_no, p.name, st.type, p.landing_price, p.price, p.created_at, p.updated_at,
+       p.id, p.art_no, p.name, st.type, pv.landing_price, pv.price, p.created_at, p.updated_at,
        pv.id, c.colour_name, m.material_type`,
-    params
+    variantId ? [storeId, id, storeId, variantId] : [storeId, id, storeId]
   );
 
   if (!rows.length) return null;
@@ -1276,8 +1460,8 @@ async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
     [product.variantId]
   );
   const [boxStockRows] = await pool.execute(
-    "SELECT id, size_range AS sizeRange, quantity FROM box_stock WHERE product_variant_id = ? AND quantity > 0 ORDER BY id",
-    [product.variantId]
+    "SELECT id, size_range AS sizeRange, quantity FROM box_stock WHERE product_variant_id = ? AND store_id = ? AND quantity > 0 ORDER BY id",
+    [product.variantId, storeId]
   );
 
   return {
@@ -1398,10 +1582,60 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
   try {
     await connection.beginTransaction();
 
+    if (sale.saleType === "box") {
+      const boxStock = await findBoxStockForSale(connection, sale, storeId);
+
+      if (!boxStock) {
+        await connection.rollback();
+        apiMessage(response, "Mahsulot mavjud emas.", 404);
+        return;
+      }
+
+      if (Number(boxStock.quantity || 0) < sale.quantity) {
+        await connection.rollback();
+        apiMessage(response, "Ochilmagan qutilar yetarli emas.", 400);
+        return;
+      }
+
+      const saleUserId = await userIdForSale(connection, request);
+      if (!saleUserId) {
+        await connection.rollback();
+        apiMessage(response, "Sotuv tarixi uchun sotuvchi topilmadi.", 403);
+        return;
+      }
+
+      const pairCount = pairCountFromSizeRange(boxStock.sizeRange);
+      const landingPrice = Number(boxStock.landingPrice || 0) * pairCount;
+      const remainingQuantity = Number(boxStock.quantity) - sale.quantity;
+
+      await connection.execute(
+        `INSERT INTO sold_products_box
+           (store_id, seller_user_id, box_stock_id, quantity, sold_price, landing_price)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [storeId, saleUserId, boxStock.id, sale.quantity, sale.boxPrice, landingPrice]
+      );
+
+      await connection.execute("UPDATE box_stock SET quantity = ?, updated_at = NOW() WHERE id = ?", [
+        remainingQuantity,
+        boxStock.id
+      ]);
+      await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [boxStock.productVariantId]);
+      await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [boxStock.productId]);
+      await connection.commit();
+
+      response.json({
+        success: true,
+        message: "Quti sotuv saqlandi",
+        remaining_quantity: remainingQuantity,
+        opened_box: false
+      });
+      return;
+    }
+
     const [matches] = await connection.execute(
       `SELECT
          p.id AS productId,
-         p.landing_price AS landingPrice,
+         pv.landing_price AS landingPrice,
          pv.id AS productVariantId,
          i.id AS inventoryId,
          i.quantity
@@ -1425,19 +1659,25 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
     let saleMatch = match;
 
     if (!saleMatch || Number(saleMatch.quantity || 0) < sale.quantity) {
-      const variant = await findSaleVariant(connection, sale);
+      const variant = await findSaleVariant(connection, sale, storeId);
 
       if (!variant) {
         await connection.rollback();
-        apiMessage(response, "Product is not available at all", 404);
+        apiMessage(response, "Mahsulot mavjud emas.", 404);
         return;
       }
 
-      const boxStock = await findOpenableBoxStock(connection, variant.productVariantId, sale.size, sale.openBoxIfNeeded);
+      const boxStock = await findOpenableBoxStock(
+        connection,
+        variant.productVariantId,
+        sale.size,
+        storeId,
+        sale.openBoxIfNeeded
+      );
 
       if (!boxStock) {
         await connection.rollback();
-        apiMessage(response, "Product is not available at all", 404);
+        apiMessage(response, "Mahsulot mavjud emas.", 404);
         return;
       }
 
@@ -1446,7 +1686,7 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
         response.status(409).json({
           success: false,
           requiresBoxOpen: true,
-          message: "This size is available in unopened box stock. Open one box?",
+          message: "Bu razmer ochilmagan quti zaxirasida bor. Bitta quti ochilsinmi?",
           boxStock: {
             id: boxStock.id,
             quantity: Number(boxStock.quantity || 0),
@@ -1456,12 +1696,12 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
         return;
       }
 
-      await openBoxStockInTransaction(connection, boxStock, storeId, variant.price);
+      await openBoxStockInTransaction(connection, boxStock, storeId);
 
       const [openedMatches] = await connection.execute(
         `SELECT
            p.id AS productId,
-           p.landing_price AS landingPrice,
+           pv.landing_price AS landingPrice,
            pv.id AS productVariantId,
            i.id AS inventoryId,
            i.quantity
@@ -1481,23 +1721,25 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
 
     if (!saleMatch || Number(saleMatch.quantity || 0) < sale.quantity) {
       await connection.rollback();
-      apiMessage(response, "Not enough quantity in inventory after opening box", 400);
+      apiMessage(response, "Quti ochilgandan keyin ham omborda yetarli miqdor yo'q.", 400);
       return;
     }
 
     const saleUserId = await userIdForSale(connection, request);
     if (!saleUserId) {
       await connection.rollback();
-      apiMessage(response, "Valid seller user was not found for sale history", 403);
+      apiMessage(response, "Sotuv tarixi uchun sotuvchi topilmadi.", 403);
       return;
     }
 
-    await connection.execute(
-      `INSERT INTO sold_products
-         (store_id, user_id, product_variant_id, size, quantity, sold_price, landing_price)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [storeId, saleUserId, saleMatch.productVariantId, sale.size, sale.quantity, sale.soldPrice, saleMatch.landingPrice]
-    );
+    for (let index = 0; index < sale.quantity; index += 1) {
+      await connection.execute(
+        `INSERT INTO sold_products_pair
+           (store_id, seller_user_id, product_variant_id, size, sold_price, landing_price)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [storeId, saleUserId, saleMatch.productVariantId, sale.size, sale.soldPrice, saleMatch.landingPrice]
+      );
+    }
 
     const remainingQuantity = Number(saleMatch.quantity) - sale.quantity;
     if (remainingQuantity > 0) {
@@ -1515,7 +1757,7 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
 
     response.json({
       success: true,
-      message: sale.openBoxIfNeeded ? "Box opened and product marked as sold successfully" : "Product marked as sold successfully",
+      message: sale.openBoxIfNeeded ? "Quti ochildi va mahsulot sotilgan deb belgilandi" : "Mahsulot sotilgan deb belgilandi",
       remaining_quantity: remainingQuantity,
       opened_box: sale.openBoxIfNeeded
     });
@@ -1531,45 +1773,91 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
   try {
     const saleDate = normalizeSoldProductsDate(request.query.date);
     if (!saleDate) {
-      apiMessage(response, "Valid date is required.", 400);
+      apiMessage(response, "To'g'ri sana kiritilishi kerak.", 400);
       return;
     }
 
     const sellerOnly = !canViewLandingPrice(request);
+    const storeId = currentStoreId(request);
+    const queryParams = sellerOnly
+      ? [storeId, saleDate, saleDate, request.user.id, storeId, saleDate, saleDate, request.user.id]
+      : [storeId, saleDate, saleDate, storeId, saleDate, saleDate];
     const [rows] = await pool.execute(
-      `SELECT
-         sp.id,
-         sp.size,
-         sp.quantity,
-         sp.sold_price AS soldPrice,
-         sp.landing_price AS landingPrice,
-         sp.sold_at AS soldAt,
-         p.art_no AS artNo,
-         p.name,
-         st.type,
-         c.colour_name AS colour,
-         m.material_type AS material,
-         CONCAT(u.fname, ' ', u.lname) AS soldBy,
-         (
-           SELECT pi.image_path
-           FROM product_images pi
-           WHERE pi.product_variant_id = pv.id
-           ORDER BY pi.id
-           LIMIT 1
-         ) AS imagePath
-       FROM sold_products sp
-       INNER JOIN product_variant pv ON pv.id = sp.product_variant_id
-       INNER JOIN products p ON p.id = pv.product_id
-       LEFT JOIN shoe_type st ON st.id = p.type_id
-       INNER JOIN colours c ON c.id = pv.colour_id
-       INNER JOIN materials m ON m.id = pv.material_id
-       LEFT JOIN users u ON u.id = sp.user_id
-       WHERE sp.store_id = ?
-         AND sp.sold_at >= ?
-         AND sp.sold_at < DATE_ADD(?, INTERVAL 1 DAY)
-         ${sellerOnly ? "AND sp.user_id = ?" : ""}
-       ORDER BY sp.sold_at DESC, sp.id DESC`,
-      sellerOnly ? [currentStoreId(request), saleDate, saleDate, request.user.id] : [currentStoreId(request), saleDate, saleDate]
+      `SELECT *
+       FROM (
+         SELECT
+           CONCAT('pair-', spp.id) AS id,
+           'pair' AS saleType,
+           spp.size,
+           1 AS quantity,
+           spp.sold_price AS soldPrice,
+           spp.landing_price AS landingPrice,
+           spp.sold_at AS soldAt,
+           spp.isCancelled AS isCancelled,
+           p.art_no AS artNo,
+           p.name,
+           st.type,
+           c.colour_name AS colour,
+           m.material_type AS material,
+           CONCAT(u.fname, ' ', u.lname) AS soldBy,
+           (
+             SELECT pi.image_path
+             FROM product_images pi
+             WHERE pi.product_variant_id = pv.id
+             ORDER BY pi.id
+             LIMIT 1
+           ) AS imagePath
+         FROM sold_products_pair spp
+         INNER JOIN product_variant pv ON pv.id = spp.product_variant_id
+         INNER JOIN products p ON p.id = pv.product_id
+         LEFT JOIN shoe_type st ON st.id = p.type_id
+         INNER JOIN colours c ON c.id = pv.colour_id
+         INNER JOIN materials m ON m.id = pv.material_id
+         LEFT JOIN users u ON u.id = spp.seller_user_id
+         WHERE spp.store_id = ?
+           AND spp.sold_at >= ?
+           AND spp.sold_at < DATE_ADD(?, INTERVAL 1 DAY)
+           ${sellerOnly ? "AND spp.seller_user_id = ?" : ""}
+
+         UNION ALL
+
+         SELECT
+           CONCAT('box-', spb.id) AS id,
+           'box' AS saleType,
+           bs.size_range AS size,
+           spb.quantity,
+           spb.sold_price AS soldPrice,
+           spb.landing_price AS landingPrice,
+           spb.sold_at AS soldAt,
+           spb.isCancelled AS isCancelled,
+           p.art_no AS artNo,
+           p.name,
+           st.type,
+           c.colour_name AS colour,
+           m.material_type AS material,
+           CONCAT(u.fname, ' ', u.lname) AS soldBy,
+           (
+             SELECT pi.image_path
+             FROM product_images pi
+             WHERE pi.product_variant_id = pv.id
+             ORDER BY pi.id
+             LIMIT 1
+           ) AS imagePath
+         FROM sold_products_box spb
+         INNER JOIN box_stock bs ON bs.id = spb.box_stock_id
+         INNER JOIN product_variant pv ON pv.id = bs.product_variant_id
+         INNER JOIN products p ON p.id = pv.product_id
+         LEFT JOIN shoe_type st ON st.id = p.type_id
+         INNER JOIN colours c ON c.id = pv.colour_id
+         INNER JOIN materials m ON m.id = pv.material_id
+         LEFT JOIN users u ON u.id = spb.seller_user_id
+         WHERE spb.store_id = ?
+           AND spb.sold_at >= ?
+           AND spb.sold_at < DATE_ADD(?, INTERVAL 1 DAY)
+           ${sellerOnly ? "AND spb.seller_user_id = ?" : ""}
+       ) sales
+       ORDER BY soldAt DESC, id DESC`,
+      queryParams
     );
 
     apiData(response, {
@@ -1581,11 +1869,130 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
         ...row,
         quantity: Number(row.quantity || 0),
         soldPrice: Number(row.soldPrice || 0),
-        landingPrice: canViewLandingPrice(request) ? Number(row.landingPrice || 0) : null
+        landingPrice: canViewLandingPrice(request) ? Number(row.landingPrice || 0) : null,
+        isCancelled: Boolean(row.isCancelled)
       }))
     });
   } catch (error) {
     next(error);
+  }
+});
+
+app.post("/api/sold-products/:id/cancel", requireAuth, requireStoreOwner, async (request, response, next) => {
+  if (!canViewLandingPrice(request)) {
+    apiMessage(response, "Sotuvni faqat do'kon egasi yoki menejer bekor qilishi mumkin.", 403);
+    return;
+  }
+
+  const match = cleanText(request.params.id).match(/^(pair|box)-(\d+)$/);
+  if (!match) {
+    apiMessage(response, "Sotuv yozuvi noto'g'ri.", 400);
+    return;
+  }
+
+  const [, saleType, saleIdText] = match;
+  const saleId = Number(saleIdText);
+  const storeId = currentStoreId(request);
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    if (saleType === "pair") {
+      const [[sale]] = await connection.execute(
+        `SELECT
+           spp.id,
+           spp.product_variant_id AS productVariantId,
+           spp.size,
+           spp.isCancelled,
+           p.id AS productId
+         FROM sold_products_pair spp
+         INNER JOIN product_variant pv ON pv.id = spp.product_variant_id
+         INNER JOIN products p ON p.id = pv.product_id
+         WHERE spp.id = ?
+           AND spp.store_id = ?
+         LIMIT 1
+         FOR UPDATE`,
+        [saleId, storeId]
+      );
+
+      if (!sale) {
+        await connection.rollback();
+        apiMessage(response, "Sotuv yozuvi topilmadi.", 404);
+        return;
+      }
+
+      if (sale.isCancelled) {
+        await connection.rollback();
+        apiMessage(response, "Bu sotuv allaqachon bekor qilingan.", 409);
+        return;
+      }
+
+      await addInventoryRows(connection, sale.productVariantId, [{ size: sale.size, quantity: 1 }], storeId);
+      const pairCancelColumns = ["isCancelled"];
+      if (await columnExists("sold_products_pair", "isCanceled")) {
+        pairCancelColumns.push("isCanceled");
+      }
+      await connection.execute(
+        `UPDATE sold_products_pair
+         SET ${pairCancelColumns.map((columnName) => `\`${columnName}\` = TRUE`).join(", ")}
+         WHERE id = ?`,
+        [sale.id]
+      );
+      await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [sale.productVariantId]);
+      await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [sale.productId]);
+      await connection.commit();
+
+      apiData(response, { id: request.params.id, isCancelled: true, restoredQuantity: 1 });
+      return;
+    }
+
+    const [[sale]] = await connection.execute(
+      `SELECT
+         spb.id,
+         spb.box_stock_id AS boxStockId,
+         spb.quantity,
+         spb.isCancelled,
+         bs.product_variant_id AS productVariantId,
+         p.id AS productId
+       FROM sold_products_box spb
+       INNER JOIN box_stock bs ON bs.id = spb.box_stock_id
+       INNER JOIN product_variant pv ON pv.id = bs.product_variant_id
+       INNER JOIN products p ON p.id = pv.product_id
+       WHERE spb.id = ?
+         AND spb.store_id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [saleId, storeId]
+    );
+
+    if (!sale) {
+      await connection.rollback();
+      apiMessage(response, "Sotuv yozuvi topilmadi.", 404);
+      return;
+    }
+
+    if (sale.isCancelled) {
+      await connection.rollback();
+      apiMessage(response, "Bu sotuv allaqachon bekor qilingan.", 409);
+      return;
+    }
+
+    await connection.execute("UPDATE box_stock SET quantity = quantity + ?, updated_at = NOW() WHERE id = ?", [
+      sale.quantity,
+      sale.boxStockId
+    ]);
+    await connection.execute("UPDATE sold_products_box SET isCancelled = TRUE WHERE id = ?", [sale.id]);
+    await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [sale.productVariantId]);
+    await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [sale.productId]);
+    await connection.commit();
+
+    apiData(response, { id: request.params.id, isCancelled: true, restoredQuantity: Number(sale.quantity || 0) });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
   }
 });
 // New sold-product feature code ends.
@@ -1600,9 +2007,10 @@ app.get("/api/products", requireAuth, requireStoreOwner, async (request, respons
        FROM products p
        INNER JOIN product_variant pv ON pv.product_id = p.id
        LEFT JOIN inventory i ON i.product_variant_id = pv.id AND i.store_id = ?
+       WHERE pv.store_id = ?
        GROUP BY p.id, pv.id
        ORDER BY p.updated_at DESC, p.created_at DESC, pv.updated_at DESC, pv.created_at DESC`,
-      [storeId]
+      [storeId, storeId]
     );
 
     const products = (await Promise.all(rows.map((row) => fetchProduct(row.id, storeId, row.variantId))))
@@ -1625,13 +2033,14 @@ app.get("/api/products/match", requireAuth, requireStoreOwner, async (request, r
       return;
     }
 
-    const match = await findMatchingProductByText(artNo, colour, material);
+    const storeId = currentStoreId(request);
+    const match = await findMatchingProductByText(artNo, colour, material, storeId);
     if (!match) {
       apiData(response, []);
       return;
     }
 
-    apiData(response, [productForClient(request, await fetchProduct(match.productId, currentStoreId(request)))].filter(Boolean));
+    apiData(response, [productForClient(request, await fetchProduct(match.productId, storeId, match.variantId))].filter(Boolean));
   } catch (error) {
     next(error);
   }
@@ -1653,6 +2062,67 @@ app.get("/api/products/lookup", requireAuth, requireStoreOwner, async (request, 
     apiData(response, lookup);
   } catch (error) {
     next(error);
+  }
+});
+
+app.post("/api/products/prices", requireAuth, requireStoreOwner, async (request, response, next) => {
+  const validation = validatePriceUpdatePayload(request.body);
+  if (validation.error) {
+    apiMessage(response, validation.error, 400);
+    return;
+  }
+
+  if (!canViewLandingPrice(request)) {
+    apiMessage(response, "Narxlarni faqat do'kon egasi yoki menejer yangilashi mumkin.", 403);
+    return;
+  }
+
+  const data = validation.priceUpdate;
+  const storeId = currentStoreId(request);
+  const assignments = [];
+  const values = [];
+
+  if (data.landingPrice !== undefined) {
+    assignments.push("pv.landing_price = ?");
+    values.push(data.landingPrice);
+  }
+
+  if (data.sellingPrice !== undefined) {
+    assignments.push("pv.price = ?");
+    values.push(data.sellingPrice);
+  }
+
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [updated] = await connection.execute(
+      `UPDATE product_variant pv
+       INNER JOIN products p ON p.id = pv.product_id
+       SET ${assignments.join(", ")}, pv.updated_at = NOW(), p.updated_at = NOW()
+       WHERE p.art_no = ?
+         AND pv.store_id = ?`,
+      [...values, data.artNo, storeId]
+    );
+
+    if (!updated.affectedRows) {
+      await connection.rollback();
+      apiMessage(response, "Bu art no bo'yicha mahsulot topilmadi.", 404);
+      return;
+    }
+
+    await connection.commit();
+    apiData(response, {
+      artNo: data.artNo,
+      updatedVariants: updated.affectedRows,
+      lookup: await fetchProductLookupByArtNo(data.artNo, storeId)
+    });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
   }
 });
 
@@ -1687,13 +2157,16 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
     const typeId = await getOrCreateLookup(connection, "shoe_type", "id", "type", data.type);
     const colourId = await getOrCreateLookup(connection, "colours", "id", "colour_name", data.colour);
     const materialId = await getOrCreateLookup(connection, "materials", "id", "material_type", data.material);
-    const existing = await findMatchingProductVariant(connection, data, colourId, materialId);
+    const existing = await findMatchingProductVariant(connection, data, colourId, materialId, storeId);
 
     if (existing) {
-      await addStockRowsForProduct(connection, existing.variantId, data.price, data.inventory, storeId, data.boxQuantity);
+      await connection.execute(
+        "UPDATE product_variant SET price = ?, landing_price = ?, updated_at = NOW() WHERE id = ?",
+        [data.price, data.landingPrice, existing.variantId]
+      );
+      await addStockRowsForProduct(connection, existing.variantId, data.inventory, storeId, data.boxQuantity);
       await saveProductImages(connection, existing.variantId, data.images);
       await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [existing.productId]);
-      await connection.execute("UPDATE product_variant SET updated_at = NOW() WHERE id = ?", [existing.variantId]);
       await connection.commit();
 
       apiData(response, {
@@ -1706,18 +2179,18 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
     const existingProduct = await findProductByArtNo(connection, data.artNo);
     if (existingProduct) {
       const [variantInsert] = await connection.execute(
-        "INSERT INTO product_variant (product_id, colour_id, material_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
-        [existingProduct.productId, colourId, materialId]
+        "INSERT INTO product_variant (product_id, store_id, colour_id, material_id, price, landing_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())",
+        [existingProduct.productId, storeId, colourId, materialId, data.price, data.landingPrice]
       );
 
       await connection.execute(
         `UPDATE products
-         SET name = ?, type_id = ?, landing_price = ?, price = ?, updated_at = NOW()
+         SET name = ?, type_id = ?, updated_at = NOW()
          WHERE id = ?`,
-        [data.name || data.artNo, typeId, data.landingPrice, data.price, existingProduct.productId]
+        [data.name || data.artNo, typeId, existingProduct.productId]
       );
       await writeProductSeasons(connection, existingProduct.productId, data.seasons);
-      await writeStockRowsForProduct(connection, variantInsert.insertId, data.price, data.inventory, storeId, data.boxQuantity);
+      await writeStockRowsForProduct(connection, variantInsert.insertId, data.inventory, storeId, data.boxQuantity);
       await saveProductImages(connection, variantInsert.insertId, data.images);
       await connection.commit();
 
@@ -1726,18 +2199,18 @@ app.post("/api/products", requireAuth, requireStoreOwner, async (request, respon
     }
 
     const [productInsert] = await connection.execute(
-      `INSERT INTO products (art_no, name, brand_id, type_id, landing_price, price, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [data.artNo, data.name || data.artNo, brandId, typeId, data.landingPrice, data.price]
+      `INSERT INTO products (art_no, name, brand_id, type_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, NOW(), NOW())`,
+      [data.artNo, data.name || data.artNo, brandId, typeId]
     );
 
     const [variantInsert] = await connection.execute(
-      "INSERT INTO product_variant (product_id, colour_id, material_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
-      [productInsert.insertId, colourId, materialId]
+      "INSERT INTO product_variant (product_id, store_id, colour_id, material_id, price, landing_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())",
+      [productInsert.insertId, storeId, colourId, materialId, data.price, data.landingPrice]
     );
 
     await writeProductSeasons(connection, productInsert.insertId, data.seasons);
-    await writeStockRowsForProduct(connection, variantInsert.insertId, data.price, data.inventory, storeId, data.boxQuantity);
+    await writeStockRowsForProduct(connection, variantInsert.insertId, data.inventory, storeId, data.boxQuantity);
     await saveProductImages(connection, variantInsert.insertId, data.images);
     await connection.commit();
 
@@ -1791,27 +2264,27 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
 
     await connection.execute(
       `UPDATE products
-       SET art_no = ?, name = ?, brand_id = ?, type_id = ?, landing_price = ?, price = ?, updated_at = NOW()
+       SET art_no = ?, name = ?, brand_id = ?, type_id = ?, updated_at = NOW()
        WHERE id = ?`,
-      [data.artNo, data.name || data.artNo, brandId, typeId, data.landingPrice, data.price, productId]
+      [data.artNo, data.name || data.artNo, brandId, typeId, productId]
     );
 
     let variantId = existing.variantId;
     if (variantId) {
       await connection.execute(
-        "UPDATE product_variant SET colour_id = ?, material_id = ?, updated_at = NOW() WHERE id = ?",
-        [colourId, materialId, variantId]
+        "UPDATE product_variant SET store_id = ?, colour_id = ?, material_id = ?, price = ?, landing_price = ?, updated_at = NOW() WHERE id = ?",
+        [storeId, colourId, materialId, data.price, data.landingPrice, variantId]
       );
     } else {
       const [variantInsert] = await connection.execute(
-        "INSERT INTO product_variant (product_id, colour_id, material_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
-        [productId, colourId, materialId]
+        "INSERT INTO product_variant (product_id, store_id, colour_id, material_id, price, landing_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())",
+        [productId, storeId, colourId, materialId, data.price, data.landingPrice]
       );
       variantId = variantInsert.insertId;
     }
 
     await writeProductSeasons(connection, productId, data.seasons);
-    await writeInventoryRows(connection, variantId, data.price, data.inventory, storeId);
+    await writeInventoryRows(connection, variantId, data.inventory, storeId);
     await saveProductImages(connection, variantId, data.images);
     await connection.commit();
 
@@ -1899,7 +2372,7 @@ app.listen(port, host, async () => {
     await testConnection();
     await removeArtNoUniqueIndexes();
     await ensureBoxStockTable();
-    await ensureSoldProductsTable();
+    await ensureSoldProductsTables();
     await cleanupStaleTempUploads();
     setInterval(() => {
       cleanupStaleTempUploads().catch((error) => {

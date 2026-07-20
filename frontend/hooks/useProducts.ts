@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { api, Product, Metadata, SoldProductPayload, SoldProductResponse } from '@/lib/api';
+import { api, Product, Metadata, PriceUpdatePayload, SoldProductPayload, SoldProductResponse } from '@/lib/api';
 
 function productRowKey(product: Product): string {
   return product.variantId ? `variant-${product.variantId}` : `product-${product.id}`;
@@ -14,6 +14,7 @@ export interface UseProductsReturn {
   fetchMetadata: () => Promise<void>;
   createProduct: (product: Product) => Promise<Product | null>;
   updateProduct: (id: number, product: Product) => Promise<Product | null>;
+  updateProductPrices: (payload: PriceUpdatePayload) => Promise<boolean>;
   deleteProduct: (id: number) => Promise<boolean>;
   markProductSold: (payload: SoldProductPayload) => Promise<SoldProductResponse>;
   getTotalStock: () => number;
@@ -39,7 +40,7 @@ export function useProducts(): UseProductsReturn {
       const data = await api.getProducts();
       setProducts(data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch products';
+      const message = err instanceof Error ? err.message : 'Mahsulotlarni yuklab bo\'lmadi';
       setError(message);
       console.error('[v0] Failed to fetch products:', message);
     } finally {
@@ -68,7 +69,7 @@ export function useProducts(): UseProductsReturn {
       });
       return newProduct;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create product';
+      const message = err instanceof Error ? err.message : 'Mahsulotni yaratib bo\'lmadi';
       setError(message);
       console.error('[v0] Failed to create product:', message);
       return null;
@@ -85,7 +86,7 @@ export function useProducts(): UseProductsReturn {
         );
         return updated;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to update product';
+        const message = err instanceof Error ? err.message : 'Mahsulotni yangilab bo\'lmadi';
         setError(message);
         console.error('[v0] Failed to update product:', message);
         return null;
@@ -100,12 +101,28 @@ export function useProducts(): UseProductsReturn {
       setProducts((prev) => prev.filter((p) => p.id !== id));
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete product';
+      const message = err instanceof Error ? err.message : 'Mahsulotni o\'chirib bo\'lmadi';
       setError(message);
       console.error('[v0] Failed to delete product:', message);
       return false;
     }
   }, []);
+
+  const updateProductPrices = useCallback(
+    async (payload: PriceUpdatePayload): Promise<boolean> => {
+      try {
+        await api.updateProductPrices(payload);
+        await fetchProducts();
+        return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Narxlarni yangilab bo\'lmadi';
+        setError(message);
+        console.error('[v0] Failed to update product prices:', message);
+        return false;
+      }
+    },
+    [fetchProducts]
+  );
 
   // New sold-product feature code starts.
   const markProductSold = useCallback(
@@ -115,7 +132,7 @@ export function useProducts(): UseProductsReturn {
         await fetchProducts();
         return result;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to mark product as sold';
+        const message = err instanceof Error ? err.message : 'Mahsulotni sotilgan deb belgilab bo\'lmadi';
         if (!(err as any)?.requiresBoxOpen) {
           setError(message);
           console.error('[v0] Failed to mark product as sold:', message);
@@ -163,6 +180,7 @@ export function useProducts(): UseProductsReturn {
     fetchMetadata,
     createProduct,
     updateProduct,
+    updateProductPrices,
     deleteProduct,
     markProductSold,
     getTotalStock,

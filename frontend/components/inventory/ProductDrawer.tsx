@@ -14,9 +14,9 @@ interface ProductDrawerProps {
 
 function getStockStatus(inventory: { size: number; quantity: number }[]) {
   const total = inventory.reduce((sum, item) => sum + item.quantity, 0);
-  if (total === 0) return { status: STOCK_STATUS.OUT_OF_STOCK, label: 'Out of Stock', color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' };
-  if (total < LOW_STOCK_THRESHOLD) return { status: STOCK_STATUS.LOW_STOCK, label: 'Low Stock', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200' };
-  return { status: STOCK_STATUS.IN_STOCK, label: 'In Stock', color: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' };
+  if (total === 0) return { status: STOCK_STATUS.OUT_OF_STOCK, label: 'Tugagan', color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' };
+  if (total < LOW_STOCK_THRESHOLD) return { status: STOCK_STATUS.LOW_STOCK, label: 'Kam qolgan', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200' };
+  return { status: STOCK_STATUS.IN_STOCK, label: 'Mavjud', color: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' };
 }
 
 function getTotalStock(inventory: { size: number; quantity: number }[]) {
@@ -60,7 +60,7 @@ export function ProductDrawer({
           {/* Header */}
           <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-800">
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-              Product Details
+              Mahsulot tafsilotlari
             </h2>
             <button
               onClick={onClose}
@@ -76,7 +76,7 @@ export function ProductDrawer({
             {images.length > 0 && (
               <div className="space-y-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                  Images
+                  Rasmlar
                 </h3>
                 <div className="relative overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800">
                   {currentImage ? (
@@ -87,7 +87,7 @@ export function ProductDrawer({
                     />
                   ) : (
                     <div className="h-64 flex items-center justify-center text-gray-400">
-                      No image
+                      Rasm yo'q
                     </div>
                   )}
                 </div>
@@ -130,7 +130,7 @@ export function ProductDrawer({
                       >
                         <img
                           src={img.path || ''}
-                          alt={`Thumbnail ${idx + 1}`}
+                          alt={`Kichik rasm ${idx + 1}`}
                           className="h-full w-full object-cover"
                         />
                       </button>
@@ -143,24 +143,24 @@ export function ProductDrawer({
             {/* Product Information */}
             <div className="space-y-3">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                Information
+                Ma'lumot
               </h3>
               <div className="space-y-2">
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Art Number</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Art no</p>
                   <p className="font-bold text-lg text-gray-900 dark:text-gray-100">
                     {product.artNo}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Product Name</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Mahsulot nomi</p>
                   <p className="font-semibold text-gray-900 dark:text-gray-100">
                     {product.name}
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">Type</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Turi</p>
                     <p className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">
                       {product.type}
                     </p>
@@ -174,7 +174,7 @@ export function ProductDrawer({
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">Colour</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Rang</p>
                     <div className="flex items-center gap-2">
                       <div
                         className="h-5 w-5 rounded border border-gray-300 dark:border-gray-600"
@@ -186,9 +186,9 @@ export function ProductDrawer({
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">Seasons</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Mavsumlar</p>
                     <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {product.seasons?.join(', ') || 'N/A'}
+                      {product.seasons?.join(', ') || 'Yo\'q'}
                     </p>
                   </div>
                 </div>
@@ -198,18 +198,18 @@ export function ProductDrawer({
             {/* Pricing */}
             <div className="space-y-3">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                Pricing
+                Narxlar
               </h3>
               <div className={`grid gap-4 rounded-lg bg-gray-50 p-4 dark:bg-gray-800 ${canViewLandingPrice ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Selling Price</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Sotish narxi</p>
                   <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                     {product.price.toLocaleString()}
                   </p>
                 </div>
                 {canViewLandingPrice && product.landingPrice !== null && (
                   <div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">Landing Price</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Kelish narxi</p>
                     <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                       {product.landingPrice.toLocaleString()}
                     </p>
@@ -222,7 +222,7 @@ export function ProductDrawer({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                  Inventory
+                  Inventar
                 </h3>
                 <span className={`inline-block rounded px-2.5 py-0.5 text-xs font-medium ${stockInfo.color}`}>
                   {stockInfo.label}
@@ -231,7 +231,7 @@ export function ProductDrawer({
 
               {/* Total Stock Summary */}
               <div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-950">
-                <p className="text-xs text-blue-600 dark:text-blue-400">Total Stock</p>
+                <p className="text-xs text-blue-600 dark:text-blue-400">Jami qoldiq</p>
                 <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
                   {totalStock}
                 </p>
@@ -242,18 +242,18 @@ export function ProductDrawer({
                 <table className="w-full text-sm">
                   <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
                     <tr>
-                      <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Size</th>
-                      <th className="px-3 py-2 text-center font-semibold text-gray-900 dark:text-gray-100">Qty</th>
-                      <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Status</th>
+                      <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Razmer</th>
+                      <th className="px-3 py-2 text-center font-semibold text-gray-900 dark:text-gray-100">Soni</th>
+                      <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Holat</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedInventory.map((item) => {
                       const itemStatus = item.quantity === 0
-                        ? 'Out of Stock'
+                        ? 'Tugagan'
                         : item.quantity < LOW_STOCK_THRESHOLD
-                        ? 'Low Stock'
-                        : 'In Stock';
+                        ? 'Kam qolgan'
+                        : 'Mavjud';
                       const itemColor = item.quantity === 0
                         ? 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300'
                         : item.quantity < LOW_STOCK_THRESHOLD
@@ -283,7 +283,7 @@ export function ProductDrawer({
               {boxStock.length > 0 && (
                 <div className="space-y-2">
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                    Box Stock
+                    Quti zaxirasi
                   </h4>
                   <div className="space-y-2">
                     {boxStock.map((item) => (
@@ -291,7 +291,7 @@ export function ProductDrawer({
                         key={item.id}
                         className="rounded-lg border border-sky-200 bg-sky-50 p-3 dark:border-sky-800 dark:bg-sky-950"
                       >
-                        <p className="text-xs text-sky-700 dark:text-sky-300">Unopened boxes</p>
+                        <p className="text-xs text-sky-700 dark:text-sky-300">Ochilmagan qutilar</p>
                         <p className="text-lg font-bold text-sky-800 dark:text-sky-100">{item.quantity}</p>
                         <p className="mt-1 text-sm font-medium text-sky-900 dark:text-sky-100">{item.sizeRange}</p>
                       </div>

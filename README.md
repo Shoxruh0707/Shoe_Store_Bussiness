@@ -248,7 +248,8 @@ Expected tables include:
 - `product_images`
 - `inventory`
 - `box_stock`
-- `sold_products`
+- `sold_products_pair`
+- `sold_products_box`
 
 ## Backend Routes
 

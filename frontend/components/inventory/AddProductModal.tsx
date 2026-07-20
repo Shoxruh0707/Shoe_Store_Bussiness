@@ -17,11 +17,11 @@ interface AddProductModalProps {
 type Step = 'basic' | 'details' | 'pricing' | 'images' | 'inventory';
 
 const STEPS: { id: Step; label: string }[] = [
-  { id: 'basic', label: 'Basic Info' },
-  { id: 'details', label: 'Details' },
-  { id: 'images', label: 'Images' },
-  { id: 'pricing', label: 'Pricing' },
-  { id: 'inventory', label: 'Inventory' },
+  { id: 'basic', label: 'Asosiy' },
+  { id: 'details', label: 'Tafsilot' },
+  { id: 'images', label: 'Rasmlar' },
+  { id: 'pricing', label: 'Narxlar' },
+  { id: 'inventory', label: 'Inventar' },
 ];
 
 const emptyProductForm = (): Product => ({
@@ -152,7 +152,7 @@ export function AddProductModal({
                 ? {
                     ...image,
                     uploading: false,
-                    error: error instanceof Error ? error.message : 'Upload failed',
+                    error: error instanceof Error ? error.message : 'Yuklash bajarilmadi',
                   }
                 : image
             ),
@@ -184,8 +184,8 @@ export function AddProductModal({
   };
 
   const goToStep = (step: Step) => {
-    if (exactVariant && (step === 'pricing' || step === 'images')) {
-      setCurrentStep('inventory');
+    if (!visibleSteps.some((visibleStep) => visibleStep.id === step)) {
+      setCurrentStep(visibleSteps[visibleSteps.length - 1]?.id || 'inventory');
       return;
     }
     setCurrentStep(step);
@@ -207,19 +207,19 @@ export function AddProductModal({
 
   const handleSubmit = async () => {
     if (!formData.artNo || !formData.type || !formData.colour || !formData.material) {
-      setSubmitError('Please fill in all required fields.');
+      setSubmitError('Iltimos, barcha majburiy maydonlarni to\'ldiring.');
       return;
     }
     if (!formData.seasons.length) {
-      setSubmitError('Please select at least one season.');
+      setSubmitError('Kamida bitta mavsum tanlang.');
       return;
     }
     if (formData.images.some((image) => image.uploading)) {
-      setSubmitError('Please wait until image uploads finish.');
+      setSubmitError('Rasmlar yuklanishi tugashini kuting.');
       return;
     }
     if (formData.images.some((image) => image.error)) {
-      setSubmitError('Remove failed image uploads before saving.');
+      setSubmitError('Saqlashdan oldin yuklanmagan rasmlarni olib tashlang.');
       return;
     }
     try {
@@ -235,13 +235,13 @@ export function AddProductModal({
       setCurrentStep('basic');
       onClose();
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : 'Failed to save product.');
+      setSubmitError(error instanceof Error ? error.message : 'Mahsulotni saqlab bo\'lmadi.');
       console.error('[v0] Error saving product:', error);
     }
   };
 
   const handleClose = () => {
-    if (unsavedChanges && !window.confirm('You have unsaved changes. Are you sure you want to close?')) {
+    if (unsavedChanges && !window.confirm('Saqlanmagan o\'zgarishlar bor. Rostdan yopasizmi?')) {
       return;
     }
     setFormData(emptyProductForm());
@@ -255,15 +255,18 @@ export function AddProductModal({
 
   const normalizedColour = formData.colour.trim().toLowerCase();
   const normalizedMaterial = formData.material.trim().toLowerCase();
+  const hasExistingArt = Boolean(artLookup?.product);
   const exactVariant =
     artLookup?.variants.find(
       (variant) =>
         variant.colour.toLowerCase() === normalizedColour &&
         variant.material.toLowerCase() === normalizedMaterial
     ) || null;
-  const visibleSteps = exactVariant
-    ? STEPS.filter((step) => !['pricing', 'images'].includes(step.id))
-    : STEPS;
+  const visibleSteps = STEPS.filter((step) => {
+    if (hasExistingArt && step.id === 'pricing') return false;
+    if (exactVariant && step.id === 'images') return false;
+    return true;
+  });
   const currentStepIndex = visibleSteps.findIndex((s) => s.id === currentStep);
   const isFirstStep = currentStepIndex === 0;
   const isLastStep = currentStepIndex === visibleSteps.length - 1;
@@ -274,7 +277,6 @@ export function AddProductModal({
   const landingPrice = Number(formData.landingPrice || 0);
   const hasUploadingImages = formData.images.some((image) => image.uploading);
   const hasFailedImages = formData.images.some((image) => image.error);
-  const hasExistingArt = Boolean(artLookup?.product);
   const suggestedColours = artLookup?.colours || [];
   const suggestedMaterials = normalizedColour
     ? [
@@ -318,7 +320,7 @@ export function AddProductModal({
       } catch (error) {
         if (!cancelled) {
           setArtLookup(null);
-          setSubmitError(error instanceof Error ? error.message : 'Failed to check art number.');
+          setSubmitError(error instanceof Error ? error.message : 'Art no ni tekshirib bo\'lmadi.');
         }
       } finally {
         if (!cancelled) setLookupLoading(false);
@@ -363,7 +365,7 @@ export function AddProductModal({
             {/* Header */}
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-800">
               <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                {editingProduct ? 'Edit Product' : 'Add New Product'}
+                {editingProduct ? 'Mahsulotni tahrirlash' : 'Yangi mahsulot qo\'shish'}
               </h2>
               <button
                 onClick={handleClose}
@@ -407,28 +409,28 @@ export function AddProductModal({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Art Number <span className="text-red-600">*</span>
+                      Art no <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="text"
                       value={formData.artNo}
                       onChange={(e) => handleArtNoChange(e.target.value)}
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                      placeholder="e.g., ART-001"
+                      placeholder="Masalan, ART-001"
                     />
                     {lookupLoading && (
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Checking art number...</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Art no tekshirilmoqda...</p>
                     )}
                     {hasExistingArt && (
                       <p className="mt-1 text-xs font-medium text-green-700 dark:text-green-300">
-                        Existing art number found. Product details were filled automatically.
+                        Mavjud art no topildi. Mahsulot ma'lumotlari avtomatik to'ldirildi.
                       </p>
                     )}
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Product Name
+                      Mahsulot nomi
                     </label>
                     <input
                       type="text"
@@ -436,13 +438,13 @@ export function AddProductModal({
                       onChange={(e) => handleFieldChange('name', e.target.value)}
                       disabled={hasExistingArt}
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                      placeholder="e.g., Classic Sneaker"
+                      placeholder="Masalan, Classic Sneaker"
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Type <span className="text-red-600">*</span>
+                      Turi <span className="text-red-600">*</span>
                     </label>
                     <select
                       value={formData.type}
@@ -450,7 +452,7 @@ export function AddProductModal({
                       disabled={hasExistingArt}
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
                     >
-                      <option value="">Select Type</option>
+                      <option value="">Turini tanlang</option>
                       {metadata.types.map((type) => (
                         <option key={type} value={type}>
                           {type}
@@ -461,7 +463,7 @@ export function AddProductModal({
 
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Seasons
+                      Mavsumlar
                     </label>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {metadata.seasons.map((season) => (
@@ -488,14 +490,14 @@ export function AddProductModal({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Colour <span className="text-red-600">*</span>
+                      Rang <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="text"
                       value={formData.colour}
                       onChange={(e) => handleFieldChange('colour', e.target.value)}
                       className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                      placeholder="e.g., Red, Black, etc."
+                      placeholder="Masalan, Red, Black va hokazo"
                     />
                     {suggestedColours.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -522,7 +524,7 @@ export function AddProductModal({
                       value={formData.material}
                       onChange={(e) => handleFieldChange('material', e.target.value)}
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                      placeholder="e.g., Leather, Suede, etc."
+                      placeholder="Masalan, Leather, Suede va hokazo"
                     />
                     {suggestedMaterials.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -540,7 +542,7 @@ export function AddProductModal({
                     )}
                     {exactVariant && (
                       <p className="mt-3 rounded-lg bg-green-50 p-3 text-xs font-medium text-green-700 dark:bg-green-950 dark:text-green-300">
-                        This colour and material already exist for the art number. Pricing and images will be skipped; entered size quantities will be added to existing stock.
+                        Bu art no uchun rang va material allaqachon mavjud. Narx va rasmlar o'tkazib yuboriladi; kiritilgan razmer qoldiqlari mavjud omborga qo'shiladi.
                       </p>
                     )}
                   </div>
@@ -552,7 +554,7 @@ export function AddProductModal({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
-                      Product Images
+                      Mahsulot rasmlari
                     </label>
                     <div className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-6 text-center dark:border-gray-700 dark:bg-gray-800">
                       <input
@@ -567,9 +569,9 @@ export function AddProductModal({
                         <div className="flex flex-col items-center">
                           <Plus className="h-8 w-8 text-gray-400" />
                           <p className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Click to upload or drag and drop
+                            Yuklash uchun bosing yoki faylni tashlang
                           </p>
-                          <p className="text-xs text-gray-500">PNG, JPG, GIF up to 10MB</p>
+                          <p className="text-xs text-gray-500">PNG, JPG, GIF 10 MB gacha</p>
                         </div>
                       </label>
                     </div>
@@ -578,11 +580,11 @@ export function AddProductModal({
                   {formData.images.length > 0 && (
                     <div>
                       <p className="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-                        Uploaded Images ({formData.images.length})
+                        Yuklangan rasmlar ({formData.images.length})
                       </p>
                       {hasUploadingImages && (
                         <p className="mb-2 text-xs text-blue-600 dark:text-blue-300">
-                          Uploading images in the background...
+                          Rasmlar yuklanmoqda...
                         </p>
                       )}
                       <div className="grid grid-cols-3 gap-2">
@@ -595,7 +597,7 @@ export function AddProductModal({
                             />
                             {(image.uploading || image.error) && (
                               <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/55 px-2 text-center text-xs font-medium text-white">
-                                {image.uploading ? 'Uploading...' : image.error}
+                                {image.uploading ? 'Yuklanmoqda...' : image.error}
                               </div>
                             )}
                             <button
@@ -617,7 +619,7 @@ export function AddProductModal({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Selling Price <span className="text-red-600">*</span>
+                      Sotish narxi <span className="text-red-600">*</span>
                     </label>
                     <div className="relative mt-1">
                       <input
@@ -626,14 +628,14 @@ export function AddProductModal({
                         value={formData.price}
                         onChange={(e) => handleFieldChange('price', e.target.value)}
                         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                        placeholder="Enter selling price"
+                        placeholder="Sotish narxini kiriting"
                       />
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Landing Price <span className="text-red-600">*</span>
+                      Kelish narxi <span className="text-red-600">*</span>
                     </label>
                     <div className="relative mt-1">
                       <input
@@ -642,14 +644,14 @@ export function AddProductModal({
                         value={formData.landingPrice ?? ''}
                         onChange={(e) => handleFieldChange('landingPrice', e.target.value)}
                         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                        placeholder="Enter landing price"
+                        placeholder="Kelish narxini kiriting"
                       />
                     </div>
                   </div>
 
                   {sellingPrice > 0 && landingPrice > 0 && (
                     <div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-950">
-                      <p className="text-xs text-blue-600 dark:text-blue-400">Profit Margin</p>
+                      <p className="text-xs text-blue-600 dark:text-blue-400">Foyda farqi</p>
                       <p className="text-lg font-bold text-blue-700 dark:text-blue-300">
                         {(sellingPrice - landingPrice).toLocaleString()} ({(((sellingPrice - landingPrice) / landingPrice) * 100).toFixed(1)}%)
                       </p>
@@ -662,7 +664,7 @@ export function AddProductModal({
               {currentStep === 'inventory' && (
                 <div className="space-y-4">
                   <div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-950">
-                    <p className="text-xs text-blue-600 dark:text-blue-400">Total Stock</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">Jami qoldiq</p>
                     <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
                       {totalInventory}
                     </p>
@@ -670,7 +672,7 @@ export function AddProductModal({
 
                   <div>
                     <p className="mb-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Sizes & Quantities
+                      Razmerlar va soni
                     </p>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {formData.inventory.map((item) => (
@@ -683,7 +685,7 @@ export function AddProductModal({
                           }`}
                         >
                           <p className="text-center text-sm font-bold text-gray-900 dark:text-gray-100">
-                            Size {item.size}
+                            Razmer {item.size}
                           </p>
                           <div className="mt-2 flex items-center justify-between gap-1">
                             <button
@@ -712,7 +714,7 @@ export function AddProductModal({
                       htmlFor="box-quantity"
                       className="block text-sm font-medium text-gray-900 dark:text-gray-100"
                     >
-                      Box Quantity
+                      Quti soni
                     </label>
                     <input
                       id="box-quantity"
@@ -742,7 +744,7 @@ export function AddProductModal({
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
               >
                 <ChevronLeft className="inline mr-1 h-4 w-4" />
-                Previous
+                Oldingi
               </button>
 
               {!isLastStep && (
@@ -750,7 +752,7 @@ export function AddProductModal({
                   onClick={nextStep}
                   className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
                 >
-                  Next
+                  Keyingi
                   <ChevronRight className="inline ml-1 h-4 w-4" />
                 </button>
               )}
@@ -761,7 +763,7 @@ export function AddProductModal({
                   disabled={isSubmitting || hasUploadingImages || hasFailedImages}
                   className="flex-1 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 dark:bg-green-600 dark:hover:bg-green-700"
                 >
-                  {isSubmitting ? 'Saving...' : hasUploadingImages ? 'Uploading images...' : 'Save Product'}
+                  {isSubmitting ? 'Saqlanmoqda...' : hasUploadingImages ? 'Rasmlar yuklanmoqda...' : 'Mahsulotni saqlash'}
                 </button>
               )}
             </div>

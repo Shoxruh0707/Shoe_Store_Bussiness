@@ -76,15 +76,27 @@ export interface ProductLookup {
 }
 
 // New sold-product feature code starts.
-export interface SoldProductPayload {
-  art_no: string;
-  colour_name: string;
-  material_type: string;
-  size: string;
-  sold_price: number;
-  quantity: number;
-  open_box_if_needed?: boolean;
-}
+export type SoldProductPayload =
+  | {
+      sale_type?: 'pair';
+      art_no: string;
+      colour_name: string;
+      material_type: string;
+      size: string;
+      sold_price: number;
+      quantity: number;
+      open_box_if_needed?: boolean;
+    }
+  | {
+      sale_type: 'box';
+      art_no: string;
+      colour_name: string;
+      material_type: string;
+      quantity: number;
+      pair_price: number;
+      box_price: number;
+      box_stock_id?: number;
+    };
 
 export interface SoldProductResponse {
   success: boolean;
@@ -108,7 +120,8 @@ export class APIError extends Error {
 }
 
 export interface SoldProductAnalyticsItem {
-  id: number;
+  id: string;
+  saleType?: 'pair' | 'box';
   artNo: string;
   name: string;
   colour: string;
@@ -121,6 +134,7 @@ export interface SoldProductAnalyticsItem {
   soldAt: string;
   soldBy?: string;
   imagePath?: string;
+  isCancelled?: boolean;
 }
 
 export interface SoldProductsAnalyticsResponse {
@@ -129,6 +143,24 @@ export interface SoldProductsAnalyticsResponse {
     canViewLandingPrice: boolean;
   };
   items: SoldProductAnalyticsItem[];
+}
+
+export interface CancelSoldProductResponse {
+  id: string;
+  isCancelled: boolean;
+  restoredQuantity: number;
+}
+
+export interface PriceUpdatePayload {
+  artNo: string;
+  landingPriceUpdate?: number;
+  sellingPrice?: number;
+}
+
+export interface PriceUpdateResponse {
+  artNo: string;
+  updatedVariants: number;
+  lookup?: ProductLookup | null;
 }
 
 export interface AuthSession {
@@ -207,6 +239,7 @@ class APIClient {
       quantity: Number(item.quantity || 0),
       soldPrice: Number(item.soldPrice || 0),
       landingPrice: item.landingPrice === null ? null : Number(item.landingPrice || 0),
+      isCancelled: Boolean(item.isCancelled),
       imagePath:
         item.imagePath && item.imagePath.startsWith('/') && this.assetBaseUrl
           ? `${this.assetBaseUrl}${item.imagePath}`
@@ -294,7 +327,7 @@ class APIClient {
     const data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('Failed to read image file'));
+      reader.onerror = () => reject(new Error('Rasm faylini o\'qib bo\'lmadi'));
       reader.readAsDataURL(file);
     });
 
@@ -336,6 +369,11 @@ class APIClient {
     return this.request('DELETE', `/products/${id}`);
   }
 
+  async updateProductPrices(payload: PriceUpdatePayload): Promise<PriceUpdateResponse> {
+    const response = await this.request<{ data: PriceUpdateResponse }>('POST', '/products/prices', payload);
+    return response.data;
+  }
+
   // New sold-product feature code starts.
   async markProductSold(payload: SoldProductPayload): Promise<SoldProductResponse> {
     return this.request('POST', '/inventory/sold', payload);
@@ -353,6 +391,14 @@ class APIClient {
       viewer: response.data?.viewer,
       items: (response.data?.items || []).map((item) => this.normalizeSoldProduct(item)),
     };
+  }
+
+  async cancelSoldProduct(id: string): Promise<CancelSoldProductResponse> {
+    const response = await this.request<{ data: CancelSoldProductResponse }>(
+      'POST',
+      `/sold-products/${encodeURIComponent(id)}/cancel`
+    );
+    return response.data;
   }
   // New sold-product feature code ends.
 

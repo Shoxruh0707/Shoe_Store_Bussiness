@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, BarChart3, CalendarDays, ImageIcon, RefreshCw } from 'lucide-react';
+import { ArrowLeft, BarChart3, CalendarDays, ImageIcon, RefreshCw, XCircle } from 'lucide-react';
 import { api, SoldProductAnalyticsItem } from '@/lib/api';
 
 function todayForInput() {
@@ -27,6 +27,7 @@ export default function AnalyticsPage() {
   const [canViewLandingPrice, setCanViewLandingPrice] = useState(false);
   const [soldByFilter, setSoldByFilter] = useState('');
   const [loading, setLoading] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const sellerOptions = useMemo(
@@ -44,7 +45,7 @@ export default function AnalyticsPage() {
 
   const totals = useMemo(
     () =>
-      filteredItems.reduce(
+      filteredItems.filter((item) => !item.isCancelled).reduce(
         (summary, item) => ({
           quantity: summary.quantity + item.quantity,
           revenue: summary.revenue + item.soldPrice * item.quantity,
@@ -64,7 +65,7 @@ export default function AnalyticsPage() {
       setCanViewLandingPrice(Boolean(result.viewer?.canViewLandingPrice));
       setSoldByFilter('');
     } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : 'Failed to load sold products.');
+      setError(fetchError instanceof Error ? fetchError.message : 'Sotilgan mahsulotlarni yuklab bo\'lmadi.');
     } finally {
       setLoading(false);
     }
@@ -73,6 +74,24 @@ export default function AnalyticsPage() {
   useEffect(() => {
     fetchSoldProducts(selectedDate);
   }, [selectedDate]);
+
+  const cancelSale = async (item: SoldProductAnalyticsItem) => {
+    if (item.isCancelled || cancellingId) return;
+
+    const confirmed = window.confirm(`${item.artNo} sotuvini bekor qilasizmi? Mahsulot omborga qaytariladi.`);
+    if (!confirmed) return;
+
+    try {
+      setCancellingId(item.id);
+      setError(null);
+      await api.cancelSoldProduct(item.id);
+      await fetchSoldProducts(selectedDate);
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : 'Sotuvni bekor qilib bo\'lmadi.');
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-gray-50 dark:bg-gray-950">
@@ -83,13 +102,13 @@ export default function AnalyticsPage() {
               <Link
                 href="/inventory"
                 className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                aria-label="Back to inventory"
+                aria-label="Inventarga qaytish"
               >
                 <ArrowLeft className="h-5 w-5" />
               </Link>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Analytics</h1>
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Daily sold products</p>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Tahlil</h1>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Kunlik sotilgan mahsulotlar</p>
               </div>
             </div>
 
@@ -110,7 +129,7 @@ export default function AnalyticsPage() {
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-700"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
+                Yangilash
               </button>
             </div>
           </div>
@@ -120,7 +139,7 @@ export default function AnalyticsPage() {
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {error && (
           <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950 dark:text-red-200">
-            <p className="font-medium">Error loading analytics</p>
+            <p className="font-medium">Tahlilni yuklashda xatolik</p>
             <p className="mt-1">{error}</p>
           </div>
         )}
@@ -128,15 +147,15 @@ export default function AnalyticsPage() {
         {canViewLandingPrice && (
           <div className="mb-6 grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sold quantity</p>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sotilgan soni</p>
               <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{totals.quantity}</p>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sold total</p>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sotuv jami</p>
               <p className="mt-1 text-2xl font-bold text-green-700 dark:text-green-300">{money(totals.revenue)}</p>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Landing total</p>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Kelish narxi jami</p>
               <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{money(totals.landing)}</p>
             </div>
           </div>
@@ -147,17 +166,17 @@ export default function AnalyticsPage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
                 <BarChart3 className="h-4 w-4" />
-                Sold products for {selectedDate}
+                {selectedDate} uchun sotilgan mahsulotlar
               </div>
               {canViewLandingPrice && sellerOptions.length > 0 && (
                 <label className="inline-flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-300">
-                  Sold by
+                  Sotuvchi
                   <select
                     value={soldByFilter}
                     onChange={(event) => setSoldByFilter(event.target.value)}
                     className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
                   >
-                    <option value="">All sellers</option>
+                    <option value="">Barcha sotuvchilar</option>
                     {sellerOptions.map((seller) => (
                       <option key={seller} value={seller}>
                         {seller}
@@ -178,8 +197,8 @@ export default function AnalyticsPage() {
           {!loading && filteredItems.length === 0 && (
             <div className="py-10 text-center">
               <BarChart3 className="mx-auto h-10 w-10 text-gray-400 dark:text-gray-600" />
-              <p className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">No sold products</p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">Change the date or seller filter to review another set.</p>
+              <p className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">Sotilgan mahsulot yo'q</p>
+              <p className="text-xs text-gray-600 dark:text-gray-400">Boshqa natija uchun sana yoki sotuvchi filtrini o'zgartiring.</p>
             </div>
           )}
 
@@ -188,24 +207,30 @@ export default function AnalyticsPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
                   <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Image</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Art No</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Colour</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rasm</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Art no</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rang</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Material</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Type</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Size</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sold Price</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Turi</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Razmer</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sotilgan narx</th>
                     {canViewLandingPrice && (
                       <>
-                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Landing Price</th>
-                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sold By</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Kelish narxi</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sotuvchi</th>
+                        <th className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">Amal</th>
                       </>
                     )}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredItems.map((item) => (
-                    <tr key={item.id} className="border-b border-gray-200 dark:border-gray-800">
+                    <tr
+                      key={item.id}
+                      className={`border-b border-gray-200 dark:border-gray-800 ${
+                        item.isCancelled ? 'bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-100' : ''
+                      }`}
+                    >
                       <td className="px-4 py-3">
                         <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
                           {item.imagePath ? (
@@ -224,7 +249,25 @@ export default function AnalyticsPage() {
                       {canViewLandingPrice && (
                         <>
                           <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{money(item.landingPrice || 0)}</td>
-                          <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.soldBy || 'N/A'}</td>
+                          <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.soldBy || 'Yo\'q'}</td>
+                          <td className="px-4 py-3 text-right">
+                            {item.isCancelled ? (
+                              <span className="inline-flex items-center gap-1 rounded bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 dark:bg-red-900 dark:text-red-200">
+                                <XCircle className="h-3.5 w-3.5" />
+                                Bekor qilingan
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => cancelSale(item)}
+                                disabled={Boolean(cancellingId)}
+                                className="inline-flex items-center gap-1 rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-600"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                                {cancellingId === item.id ? 'Bekor qilinmoqda...' : 'Bekor qilish'}
+                              </button>
+                            )}
+                          </td>
                         </>
                       )}
                     </tr>
