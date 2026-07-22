@@ -181,6 +181,7 @@ CREATE TABLE product_images (
     image_path VARCHAR(500) NOT NULL,
 
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    isProcessed BOOLEAN NOT NULL DEFAULT FALSE,
 
     INDEX idx_product_images_variant (product_variant_id),
 
@@ -244,13 +245,13 @@ CREATE TABLE inventory (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
-    CHECK (quantity >= 0),
-
     UNIQUE KEY uq_inventory (
         product_variant_id,
         store_id,
         size
     ),
+
+    INDEX fk_inventory_store (store_id),
 
     CONSTRAINT fk_inventory_variant
         FOREIGN KEY (product_variant_id)
@@ -279,7 +280,9 @@ CREATE TABLE box_stock (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
-    CHECK (quantity >= 0),
+    INDEX idx_box_stock_product_variant_id (product_variant_id),
+    INDEX idx_box_stock_store_id (store_id),
+    INDEX idx_box_stock_quantity (quantity),
 
     CONSTRAINT fk_box_stock_variant
         FOREIGN KEY (product_variant_id)
@@ -313,6 +316,8 @@ CREATE TABLE store_users (
         store_id
     ),
 
+    INDEX fk_store_users_store (store_id),
+
     CONSTRAINT fk_store_users_user
         FOREIGN KEY (user_id)
         REFERENCES users(id)
@@ -344,6 +349,11 @@ CREATE TABLE seller_store_requests (
     resolved_at DATETIME NULL,
 
     resolved_by_user_id INT UNSIGNED NULL,
+
+    INDEX idx_seller_store_requests_seller_user_id (seller_user_id),
+    INDEX idx_seller_store_requests_store_id (store_id),
+    INDEX idx_seller_store_requests_status (status),
+    INDEX fk_request_resolver (resolved_by_user_id),
 
     CONSTRAINT fk_request_seller
         FOREIGN KEY (seller_user_id)
@@ -380,9 +390,12 @@ CREATE TABLE sold_products_pair (
     landing_price DECIMAL(10,2) NOT NULL,
     sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    isCanceled BOOLEAN NOT NULL DEFAULT FALSE,
+    isCancelled BOOLEAN NOT NULL DEFAULT FALSE,
 
-    CHECK (sold_price >= 0),
+    INDEX idx_sold_products_pair_store_id (store_id),
+    INDEX idx_sold_products_pair_seller_user_id (seller_user_id),
+    INDEX idx_sold_products_pair_product_variant_id (product_variant_id),
+    INDEX idx_sold_products_pair_sold_at (sold_at),
 
     CONSTRAINT fk_pair_store
         FOREIGN KEY (store_id)
@@ -418,9 +431,10 @@ CREATE TABLE sold_products_box (
 
     isCancelled BOOLEAN NOT NULL DEFAULT FALSE,
 
-    CHECK (quantity > 0),
-    CHECK (sold_price >= 0),
-    CHECK (landing_price >= 0),
+    INDEX idx_sold_products_box_store_id (store_id),
+    INDEX idx_sold_products_box_seller_user_id (seller_user_id),
+    INDEX idx_sold_products_box_box_stock_id (box_stock_id),
+    INDEX idx_sold_products_box_sold_at (sold_at),
 
     CONSTRAINT fk_box_sale_store
         FOREIGN KEY (store_id)

@@ -3,7 +3,7 @@ require("dotenv").config();
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const express = require("express");
 const { pool, testConnection } = require("./src/db");
 
@@ -57,15 +57,22 @@ const rembgEnabled = process.env.REMBG_ENABLED !== "false";
 const defaultRembgPython = process.platform === "win32"
   ? path.join(".venv", "Scripts", "python.exe")
   : path.join(".venv", "bin", "python");
-const rembgPython = cleanText(process.env.REMBG_PYTHON || defaultRembgPython);
 const rembgScript = cleanText(process.env.REMBG_SCRIPT || path.join("scripts", "remove_background.py"));
 const rembgTimeoutMs = Number(process.env.REMBG_TIMEOUT_MS || 120000);
+const rembgPython = rembgEnabled ? resolveRembgPython() : "";
+const rembgAvailable = rembgEnabled && Boolean(rembgPython) && Boolean(rembgScript) && fs.existsSync(projectPath(rembgScript));
 const IMAGE_MIME_EXTENSIONS = {
   "image/jpeg": ".jpg",
   "image/png": ".png",
   "image/webp": ".webp",
   "image/gif": ".gif"
 };
+
+if (rembgEnabled && !rembgAvailable) {
+  console.warn(
+    "Background removal is enabled but unavailable. Ensure .venv exists, rembg is installed, and REMBG_SCRIPT points to scripts/remove_background.py."
+  );
+}
 
 function cleanDomain(value) {
   return String(value || "")
@@ -78,6 +85,47 @@ function normalizeUrl(value) {
   return String(value || "")
     .trim()
     .replace(/\/$/, "");
+}
+
+function projectPath(value) {
+  return path.isAbsolute(value) ? value : path.join(__dirname, value);
+}
+
+function isBareCommand(value) {
+  return Boolean(value) && !path.isAbsolute(value) && !value.includes("/") && !value.includes("\\");
+}
+
+function executablePath(value) {
+  return isBareCommand(value) ? value : projectPath(value);
+}
+
+function candidateExists(value) {
+  return isBareCommand(value) || fs.existsSync(projectPath(value));
+}
+
+function canImportRembg(candidate) {
+  const probe = spawnSync(executablePath(candidate), ["-c", "import rembg"], {
+    encoding: "utf8",
+    timeout: 15000,
+    windowsHide: true
+  });
+
+  return !probe.error && probe.status === 0;
+}
+
+function resolveRembgPython() {
+  const configuredPython = cleanText(process.env.REMBG_PYTHON);
+  const fallbackCandidates = process.platform === "win32" ? ["py", "python"] : ["python3", "python"];
+  const candidates = [configuredPython, defaultRembgPython, ...fallbackCandidates]
+    .filter(Boolean)
+    .filter((candidate, index, list) => list.indexOf(candidate) === index);
+
+  for (const candidate of candidates) {
+    if (!candidateExists(candidate)) continue;
+    if (canImportRembg(candidate)) return candidate;
+  }
+
+  return "";
 }
 
 function originFromUrl(value) {
