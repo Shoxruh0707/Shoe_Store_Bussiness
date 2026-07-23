@@ -63,6 +63,7 @@ services:
       REMBG_SCRIPT: ${REMBG_SCRIPT:-/app/scripts/remove_background.py}
       REMBG_TIMEOUT_MS: ${REMBG_TIMEOUT_MS:-300000}
       REMBG_MODEL: ${REMBG_MODEL:-u2net}
+      REMBG_STARTUP_RETRY_LIMIT: ${REMBG_STARTUP_RETRY_LIMIT:-50}
       U2NET_HOME: /app/.u2net
     volumes:
       - uploads:/app/public/uploads

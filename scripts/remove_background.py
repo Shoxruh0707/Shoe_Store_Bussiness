@@ -7,6 +7,7 @@ so the server does not depend on an already-activated terminal session.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 
@@ -14,6 +15,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Remove an image background with rembg.")
     parser.add_argument("input", help="Source image path.")
     parser.add_argument("output", help="Destination PNG path.")
+    parser.add_argument(
+        "--model",
+        default=os.getenv("REMBG_MODEL", "u2net"),
+        help="rembg model name. Defaults to REMBG_MODEL or u2net.",
+    )
     return parser.parse_args()
 
 
@@ -25,10 +31,11 @@ def main() -> int:
     if not input_path.is_file():
         raise FileNotFoundError(f"Input image not found: {input_path}")
 
-    from rembg import remove
+    from rembg import new_session, remove
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(remove(input_path.read_bytes()))
+    session = new_session(args.model)
+    output_path.write_bytes(remove(input_path.read_bytes(), session=session))
     return 0
 
 

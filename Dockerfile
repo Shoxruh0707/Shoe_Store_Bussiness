@@ -14,6 +14,7 @@ ENV NODE_ENV=production \
     REMBG_PYTHON=/app/.venv/bin/python \
     REMBG_SCRIPT=/app/scripts/remove_background.py \
     REMBG_TIMEOUT_MS=300000 \
+    REMBG_MODEL=u2net \
     U2NET_HOME=/app/.u2net
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -27,9 +28,11 @@ COPY package*.json ./
 COPY server.js ./
 COPY src ./src
 COPY scripts/requirements-rembg.txt ./scripts/requirements-rembg.txt
-RUN python3 -m venv /app/.venv \
+RUN mkdir -p /app/.u2net \
+    && python3 -m venv /app/.venv \
     && /app/.venv/bin/python -m pip install --upgrade pip setuptools wheel \
-    && /app/.venv/bin/python -m pip install --no-cache-dir -r ./scripts/requirements-rembg.txt
+    && /app/.venv/bin/python -m pip install --no-cache-dir -r ./scripts/requirements-rembg.txt \
+    && U2NET_HOME=/app/.u2net /app/.venv/bin/python -c "import os; from rembg import new_session; new_session(os.environ.get('REMBG_MODEL', 'u2net'))"
 COPY scripts ./scripts
 COPY public ./public
 RUN mkdir -p public/uploads public/uploads/temp public/uploads/rembg /app/.u2net && chown -R node:node /app

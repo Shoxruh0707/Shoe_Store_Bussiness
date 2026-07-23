@@ -152,6 +152,7 @@ REMBG_ENABLED=true
 REMBG_PYTHON=.venv/bin/python
 REMBG_SCRIPT=scripts/remove_background.py
 REMBG_TIMEOUT_MS=300000
+REMBG_STARTUP_RETRY_LIMIT=50
 ```
 
 ## 6. Telegram Configuration

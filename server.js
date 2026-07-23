@@ -58,8 +58,10 @@ const defaultRembgPython = process.platform === "win32"
   ? path.join(".venv", "Scripts", "python.exe")
   : path.join(".venv", "bin", "python");
 const rembgScript = cleanText(process.env.REMBG_SCRIPT || path.join("scripts", "remove_background.py"));
+const rembgModel = cleanText(process.env.REMBG_MODEL || "u2net");
 const rembgTimeoutMs = Number(process.env.REMBG_TIMEOUT_MS || 300000);
 const rembgProbeTimeoutMs = Number(process.env.REMBG_PROBE_TIMEOUT_MS || 30000);
+const rembgStartupRetryLimit = Number(process.env.REMBG_STARTUP_RETRY_LIMIT || 50);
 const rembgResolution = rembgEnabled ? resolveRembgPython() : { python: "", diagnostics: [] };
 const rembgPython = rembgResolution.python;
 const rembgScriptPath = rembgScript ? projectPath(rembgScript) : "";
@@ -79,6 +81,7 @@ if (rembgEnabled && !rembgAvailable) {
     `REMBG_SCRIPT=${rembgScript || "(empty)"}`,
     `resolved script=${rembgScriptPath || "(empty)"}`,
     `script exists=${rembgScriptExists ? "yes" : "no"}`,
+    `REMBG_MODEL=${rembgModel || "(empty)"}`,
     ...rembgResolution.diagnostics
   ];
 
@@ -581,6 +584,17 @@ function uploadLocalPathFromPublicPath(publicPath) {
 const backgroundRemovalQueue = [];
 let isBackgroundRemovalRunning = false;
 let productImageProcessedColumnPromise = null;
+const rembgStats = {
+  queued: 0,
+  processed: 0,
+  failed: 0,
+  lastQueuedAt: null,
+  lastStartedAt: null,
+  lastFinishedAt: null,
+  lastImageId: null,
+  lastOutputPath: null,
+  lastError: null
+};
 
 function projectPath(value) {
   return path.isAbsolute(value) ? value : path.join(__dirname, value);
@@ -605,7 +619,12 @@ async function productImageProcessedColumn() {
 
 function runRembg(sourcePath, outputPath) {
   return new Promise((resolve, reject) => {
-    const child = spawn(projectPath(rembgPython), [projectPath(rembgScript), sourcePath, outputPath], {
+    const args = [projectPath(rembgScript), sourcePath, outputPath];
+    if (rembgModel) {
+      args.push("--model", rembgModel);
+    }
+
+    const child = spawn(projectPath(rembgPython), args, {
       windowsHide: true
     });
     let stderr = "";
@@ -637,7 +656,7 @@ function runRembg(sourcePath, outputPath) {
 }
 
 async function processProductImageWithRembg(imageRecord) {
-  if (!imageRecord.id) return;
+  if (!imageRecord.id) return null;
 
   const processedColumn = await productImageProcessedColumn();
   const [imageRows] = await pool.execute(
@@ -648,20 +667,20 @@ async function processProductImageWithRembg(imageRecord) {
     [imageRecord.id]
   );
 
-  if (!imageRows.length) return;
+  if (!imageRows.length) return null;
 
   const imageRow = imageRows[0];
   const originalPath = cleanText(imageRow.path);
-  if (!originalPath) return;
+  if (!originalPath) return null;
 
   const isProcessed = Boolean(Number(imageRow.isProcessed || 0));
-  if (isProcessed) return;
+  if (isProcessed) return null;
 
   if (originalPath.startsWith("/uploads/rembg/")) {
     if (processedColumn) {
       await pool.execute(`UPDATE product_images SET \`${processedColumn}\` = TRUE WHERE id = ?`, [imageRecord.id]);
     }
-    return;
+    return null;
   }
 
   const sourcePath = uploadLocalPathFromPublicPath(originalPath);
@@ -693,7 +712,10 @@ async function processProductImageWithRembg(imageRecord) {
 
   if (!updated.affectedRows) {
     await fs.promises.unlink(processedPath).catch(() => {});
+    return null;
   }
+
+  return publicProcessedPath;
 }
 
 async function runBackgroundRemovalQueue() {
@@ -703,9 +725,21 @@ async function runBackgroundRemovalQueue() {
   try {
     while (backgroundRemovalQueue.length) {
       const imageRecord = backgroundRemovalQueue.shift();
+      rembgStats.lastStartedAt = new Date().toISOString();
+      rembgStats.lastImageId = imageRecord?.id || null;
       try {
-        await processProductImageWithRembg(imageRecord);
+        const processedPath = await processProductImageWithRembg(imageRecord);
+        rembgStats.lastFinishedAt = new Date().toISOString();
+        if (processedPath) {
+          rembgStats.processed += 1;
+          rembgStats.lastOutputPath = processedPath;
+          rembgStats.lastError = null;
+          console.info(`rembg image processing completed for image ${imageRecord.id}: ${processedPath}`);
+        }
       } catch (error) {
+        rembgStats.failed += 1;
+        rembgStats.lastFinishedAt = new Date().toISOString();
+        rembgStats.lastError = error.message;
         console.error(`rembg image processing failed for image ${imageRecord?.id}: ${error.message}`);
       }
     }
@@ -715,17 +749,61 @@ async function runBackgroundRemovalQueue() {
 }
 
 function queueBackgroundRemovalProcessing(imageRecords) {
-  if (!rembgAvailable || !imageRecords.length) return;
+  if (!rembgAvailable || !imageRecords.length) {
+    if (rembgEnabled && imageRecords.length) {
+      console.warn(`Skipped background removal for ${imageRecords.length} image(s): rembg is unavailable.`);
+    }
+    return;
+  }
 
   const pendingImages = imageRecords.filter((imageRecord) => !imageRecord.isProcessed);
   if (!pendingImages.length) return;
 
   backgroundRemovalQueue.push(...pendingImages);
+  rembgStats.queued += pendingImages.length;
+  rembgStats.lastQueuedAt = new Date().toISOString();
+  console.info(`Queued ${pendingImages.length} image(s) for background removal.`);
   setTimeout(() => {
     runBackgroundRemovalQueue().catch((error) => {
       console.error(`Background removal queue failed: ${error.message}`);
     });
   }, 0).unref();
+}
+
+async function queuePendingBackgroundRemoval(limit = rembgStartupRetryLimit) {
+  if (!rembgAvailable || !limit) return;
+
+  const processedColumn = await productImageProcessedColumn();
+  const safeLimit = Math.max(0, Math.min(Number(limit) || 0, 500));
+  if (!safeLimit) return;
+
+  const [rows] = processedColumn
+    ? await pool.execute(
+        `SELECT id, image_path AS path, \`${processedColumn}\` AS isProcessed
+         FROM product_images
+         WHERE image_path NOT LIKE '/uploads/rembg/%'
+           AND \`${processedColumn}\` = FALSE
+         ORDER BY id DESC
+         LIMIT ${safeLimit}`
+      )
+    : await pool.execute(
+        `SELECT id, image_path AS path, FALSE AS isProcessed
+         FROM product_images
+         WHERE image_path NOT LIKE '/uploads/rembg/%'
+         ORDER BY id DESC
+         LIMIT ${safeLimit}`
+      );
+
+  if (!rows.length) return;
+
+  console.info(`Found ${rows.length} pending image(s) for background removal retry.`);
+  queueBackgroundRemovalProcessing(
+    rows.map((row) => ({
+      id: row.id,
+      path: row.path,
+      isProcessed: Boolean(Number(row.isProcessed || 0))
+    }))
+  );
 }
 
 function validateProductPayload(payload) {
@@ -1802,6 +1880,14 @@ app.get("/api/health", async (request, response) => {
         configuredPython: process.env.REMBG_PYTHON || null,
         script: rembgScriptPath || null,
         scriptExists: rembgScriptExists,
+        model: rembgModel || null,
+        timeoutMs: rembgTimeoutMs,
+        probeTimeoutMs: rembgProbeTimeoutMs,
+        startupRetryLimit: rembgStartupRetryLimit,
+        u2netHome: process.env.U2NET_HOME || null,
+        queueLength: backgroundRemovalQueue.length,
+        running: isBackgroundRemovalRunning,
+        stats: rembgStats,
         diagnostics: rembgResolution.diagnostics
       };
     }
@@ -2663,6 +2749,7 @@ app.listen(port, host, async () => {
     await ensureBoxStockTable();
     await ensureSoldProductsTables();
     await cleanupStaleTempUploads();
+    await queuePendingBackgroundRemoval();
     setInterval(() => {
       cleanupStaleTempUploads().catch((error) => {
         console.error(`Temporary upload cleanup failed: ${error.message}`);

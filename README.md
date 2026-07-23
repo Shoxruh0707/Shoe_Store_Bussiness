@@ -212,6 +212,7 @@ REMBG_ENABLED=true
 REMBG_PYTHON=.venv\Scripts\python.exe
 REMBG_SCRIPT=scripts\remove_background.py
 REMBG_TIMEOUT_MS=300000
+REMBG_STARTUP_RETRY_LIMIT=50
 ```
 
 Notes:
@@ -229,6 +230,8 @@ Notes:
   and script used for background removal. On direct Ubuntu installs, use
   `.venv/bin/python` and `scripts/remove_background.py`; Docker uses `/app/...`
   paths inside the container.
+- `REMBG_STARTUP_RETRY_LIMIT` retries existing unprocessed images when the
+  backend starts, useful after fixing a broken background-removal deployment.
 
 ## Database Setup
 
