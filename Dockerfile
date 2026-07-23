@@ -13,7 +13,7 @@ ENV NODE_ENV=production \
     REMBG_ENABLED=true \
     REMBG_PYTHON=/app/.venv/bin/python \
     REMBG_SCRIPT=/app/scripts/remove_background.py \
-    REMBG_TIMEOUT_MS=120000 \
+    REMBG_TIMEOUT_MS=300000 \
     U2NET_HOME=/app/.u2net
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

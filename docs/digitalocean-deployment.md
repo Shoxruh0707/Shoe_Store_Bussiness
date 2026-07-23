@@ -151,7 +151,7 @@ Use these values in `.env` for direct Ubuntu runs:
 REMBG_ENABLED=true
 REMBG_PYTHON=.venv/bin/python
 REMBG_SCRIPT=scripts/remove_background.py
-REMBG_TIMEOUT_MS=120000
+REMBG_TIMEOUT_MS=300000
 ```
 
 ## 6. Telegram Configuration

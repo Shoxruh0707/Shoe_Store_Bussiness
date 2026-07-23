@@ -211,7 +211,7 @@ DEFAULT_BRAND_NAME=Unbranded
 REMBG_ENABLED=true
 REMBG_PYTHON=.venv\Scripts\python.exe
 REMBG_SCRIPT=scripts\remove_background.py
-REMBG_TIMEOUT_MS=120000
+REMBG_TIMEOUT_MS=300000
 ```
 
 Notes:

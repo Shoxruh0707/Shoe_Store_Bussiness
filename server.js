@@ -58,7 +58,8 @@ const defaultRembgPython = process.platform === "win32"
   ? path.join(".venv", "Scripts", "python.exe")
   : path.join(".venv", "bin", "python");
 const rembgScript = cleanText(process.env.REMBG_SCRIPT || path.join("scripts", "remove_background.py"));
-const rembgTimeoutMs = Number(process.env.REMBG_TIMEOUT_MS || 120000);
+const rembgTimeoutMs = Number(process.env.REMBG_TIMEOUT_MS || 300000);
+const rembgProbeTimeoutMs = Number(process.env.REMBG_PROBE_TIMEOUT_MS || 30000);
 const rembgResolution = rembgEnabled ? resolveRembgPython() : { python: "", diagnostics: [] };
 const rembgPython = rembgResolution.python;
 const rembgScriptPath = rembgScript ? projectPath(rembgScript) : "";
@@ -115,16 +116,24 @@ function candidateExists(value) {
   return isBareCommand(value) || fs.existsSync(projectPath(value));
 }
 
-function canImportRembg(candidate) {
-  const probe = spawnSync(executablePath(candidate), ["-c", "import rembg"], {
-    encoding: "utf8",
-    timeout: 15000,
-    windowsHide: true
-  });
+function canFindRembgPackage(candidate) {
+  const probe = spawnSync(
+    executablePath(candidate),
+    ["-c", "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('rembg') else 1)"],
+    {
+      encoding: "utf8",
+      timeout: rembgProbeTimeoutMs,
+      windowsHide: true
+    }
+  );
 
   return {
     ok: !probe.error && probe.status === 0,
-    error: probe.error?.message || cleanText(probe.stderr) || cleanText(probe.stdout) || (probe.status ? `exit code ${probe.status}` : "")
+    error:
+      probe.error?.message ||
+      cleanText(probe.stderr) ||
+      cleanText(probe.stdout) ||
+      (probe.status === 1 ? "rembg package not found" : probe.status ? `exit code ${probe.status}` : "")
   };
 }
 
@@ -142,10 +151,10 @@ function resolveRembgPython() {
       continue;
     }
 
-    const probe = canImportRembg(candidate);
+    const probe = canFindRembgPackage(candidate);
     if (probe.ok) return { python: candidate, diagnostics };
 
-    diagnostics.push(`${candidate}: cannot import rembg${probe.error ? ` (${probe.error})` : ""}`);
+    diagnostics.push(`${candidate}: rembg package check failed${probe.error ? ` (${probe.error})` : ""}`);
   }
 
   return { python: "", diagnostics };
