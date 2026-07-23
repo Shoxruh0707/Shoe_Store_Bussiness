@@ -59,8 +59,11 @@ const defaultRembgPython = process.platform === "win32"
   : path.join(".venv", "bin", "python");
 const rembgScript = cleanText(process.env.REMBG_SCRIPT || path.join("scripts", "remove_background.py"));
 const rembgTimeoutMs = Number(process.env.REMBG_TIMEOUT_MS || 120000);
-const rembgPython = rembgEnabled ? resolveRembgPython() : "";
-const rembgAvailable = rembgEnabled && Boolean(rembgPython) && Boolean(rembgScript) && fs.existsSync(projectPath(rembgScript));
+const rembgResolution = rembgEnabled ? resolveRembgPython() : { python: "", diagnostics: [] };
+const rembgPython = rembgResolution.python;
+const rembgScriptPath = rembgScript ? projectPath(rembgScript) : "";
+const rembgScriptExists = Boolean(rembgScriptPath) && fs.existsSync(rembgScriptPath);
+const rembgAvailable = rembgEnabled && Boolean(rembgPython) && rembgScriptExists;
 const IMAGE_MIME_EXTENSIONS = {
   "image/jpeg": ".jpg",
   "image/png": ".png",
@@ -69,8 +72,17 @@ const IMAGE_MIME_EXTENSIONS = {
 };
 
 if (rembgEnabled && !rembgAvailable) {
+  const details = [
+    `REMBG_PYTHON=${process.env.REMBG_PYTHON || "(auto)"}`,
+    `resolved python=${rembgPython || "(none)"}`,
+    `REMBG_SCRIPT=${rembgScript || "(empty)"}`,
+    `resolved script=${rembgScriptPath || "(empty)"}`,
+    `script exists=${rembgScriptExists ? "yes" : "no"}`,
+    ...rembgResolution.diagnostics
+  ];
+
   console.warn(
-    "Background removal is enabled but unavailable. Ensure .venv exists, rembg is installed, and REMBG_SCRIPT points to scripts/remove_background.py."
+    `Background removal is enabled but unavailable. ${details.join("; ")}`
   );
 }
 
@@ -110,7 +122,10 @@ function canImportRembg(candidate) {
     windowsHide: true
   });
 
-  return !probe.error && probe.status === 0;
+  return {
+    ok: !probe.error && probe.status === 0,
+    error: probe.error?.message || cleanText(probe.stderr) || cleanText(probe.stdout) || (probe.status ? `exit code ${probe.status}` : "")
+  };
 }
 
 function resolveRembgPython() {
@@ -119,13 +134,21 @@ function resolveRembgPython() {
   const candidates = [configuredPython, defaultRembgPython, ...fallbackCandidates]
     .filter(Boolean)
     .filter((candidate, index, list) => list.indexOf(candidate) === index);
+  const diagnostics = [];
 
   for (const candidate of candidates) {
-    if (!candidateExists(candidate)) continue;
-    if (canImportRembg(candidate)) return candidate;
+    if (!candidateExists(candidate)) {
+      diagnostics.push(`${candidate}: executable not found`);
+      continue;
+    }
+
+    const probe = canImportRembg(candidate);
+    if (probe.ok) return { python: candidate, diagnostics };
+
+    diagnostics.push(`${candidate}: cannot import rembg${probe.error ? ` (${probe.error})` : ""}`);
   }
 
-  return "";
+  return { python: "", diagnostics };
 }
 
 function originFromUrl(value) {
@@ -683,7 +706,7 @@ async function runBackgroundRemovalQueue() {
 }
 
 function queueBackgroundRemovalProcessing(imageRecords) {
-  if (!rembgEnabled || !rembgPython || !rembgScript || !imageRecords.length) return;
+  if (!rembgAvailable || !imageRecords.length) return;
 
   const pendingImages = imageRecords.filter((imageRecord) => !imageRecord.isProcessed);
   if (!pendingImages.length) return;
@@ -1758,10 +1781,22 @@ app.post("/api/telegram/auth", async (request, response, next) => {
   }
 });
 
-app.get("/api/health", async (_request, response) => {
+app.get("/api/health", async (request, response) => {
   try {
     await testConnection();
-    response.json({ ok: true });
+    const payload = { ok: true };
+    if (request.query?.debug === "rembg") {
+      payload.rembg = {
+        enabled: rembgEnabled,
+        available: rembgAvailable,
+        python: rembgPython || null,
+        configuredPython: process.env.REMBG_PYTHON || null,
+        script: rembgScriptPath || null,
+        scriptExists: rembgScriptExists,
+        diagnostics: rembgResolution.diagnostics
+      };
+    }
+    response.json(payload);
   } catch (error) {
     response.status(500).json({ ok: false, message: error.message });
   }

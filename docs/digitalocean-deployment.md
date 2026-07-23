@@ -120,6 +120,40 @@ The expected response is:
 {"ok":true}
 ```
 
+To verify background removal specifically:
+
+```bash
+docker compose exec backend /app/.venv/bin/python -c "import rembg; print('rembg ok')"
+docker compose exec backend test -f /app/scripts/remove_background.py
+curl --fail --show-error "https://inventory.example.com/api/health?debug=rembg"
+```
+
+If the backend logs say background removal is enabled but unavailable, check the
+debug health response and the startup warning. In this Docker deployment,
+`REMBG_PYTHON` should be `/app/.venv/bin/python` and `REMBG_SCRIPT` should be
+`/app/scripts/remove_background.py`.
+
+If you run the app directly on Ubuntu without Docker, do not use the `/app/...`
+paths from the Docker example. From the project directory, create and use a
+local venv instead:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-venv libgomp1
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip setuptools wheel
+.venv/bin/python -m pip install -r scripts/requirements-rembg.txt
+```
+
+Use these values in `.env` for direct Ubuntu runs:
+
+```env
+REMBG_ENABLED=true
+REMBG_PYTHON=.venv/bin/python
+REMBG_SCRIPT=scripts/remove_background.py
+REMBG_TIMEOUT_MS=120000
+```
+
 ## 6. Telegram Configuration
 
 The bot uses this Mini App URL:

@@ -207,6 +207,11 @@ DEFAULT_STORE_NAME=Default Store
 DEFAULT_OWNER_PHONE=+998000000001
 
 DEFAULT_BRAND_NAME=Unbranded
+
+REMBG_ENABLED=true
+REMBG_PYTHON=.venv\Scripts\python.exe
+REMBG_SCRIPT=scripts\remove_background.py
+REMBG_TIMEOUT_MS=120000
 ```
 
 Notes:
@@ -220,6 +225,10 @@ Notes:
 - `SESSION_SECRET` signs the internal app session cookie created after Telegram verification.
 - `DEFAULT_STORE_ID` is used by the legacy/default product flow.
 - `DEFAULT_BRAND_NAME` is used because the current product form does not ask for brand.
+- `REMBG_PYTHON` and `REMBG_SCRIPT` point the backend to the Python environment
+  and script used for background removal. On direct Ubuntu installs, use
+  `.venv/bin/python` and `scripts/remove_background.py`; Docker uses `/app/...`
+  paths inside the container.
 
 ## Database Setup
 
