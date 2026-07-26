@@ -58,7 +58,13 @@ const defaultRembgPython = process.platform === "win32"
   ? path.join(".venv", "Scripts", "python.exe")
   : path.join(".venv", "bin", "python");
 const rembgScript = cleanText(process.env.REMBG_SCRIPT || path.join("scripts", "remove_background.py"));
-const rembgModel = cleanText(process.env.REMBG_MODEL || "u2net");
+const configuredRembgBackend = cleanText(process.env.REMBG_BACKEND || "bria").toLowerCase();
+const rembgBackend = ["bria", "rembg"].includes(configuredRembgBackend) ? configuredRembgBackend : "bria";
+const rembgModel = cleanText(process.env.REMBG_MODEL || (rembgBackend === "bria" ? "briaai/RMBG-2.0" : "u2net"));
+const rembgDevice = cleanText(process.env.REMBG_DEVICE || "cpu");
+const rembgBriaImageSize = Number(process.env.REMBG_BRIA_IMAGE_SIZE || 1024);
+const rembgMetricsEnabled = process.env.REMBG_METRICS !== "false";
+const rembgEstimatedCpuWatts = Number(process.env.REMBG_ESTIMATED_CPU_WATTS || 35);
 const rembgTimeoutMs = Number(process.env.REMBG_TIMEOUT_MS || 300000);
 const rembgProbeTimeoutMs = Number(process.env.REMBG_PROBE_TIMEOUT_MS || 30000);
 const rembgStartupRetryLimit = Number(process.env.REMBG_STARTUP_RETRY_LIMIT || 50);
@@ -81,7 +87,9 @@ if (rembgEnabled && !rembgAvailable) {
     `REMBG_SCRIPT=${rembgScript || "(empty)"}`,
     `resolved script=${rembgScriptPath || "(empty)"}`,
     `script exists=${rembgScriptExists ? "yes" : "no"}`,
+    `REMBG_BACKEND=${rembgBackend || "(empty)"}`,
     `REMBG_MODEL=${rembgModel || "(empty)"}`,
+    `REMBG_DEVICE=${rembgDevice || "(empty)"}`,
     ...rembgResolution.diagnostics
   ];
 
@@ -119,10 +127,28 @@ function candidateExists(value) {
   return isBareCommand(value) || fs.existsSync(projectPath(value));
 }
 
-function canFindRembgPackage(candidate) {
+function rembgProbeModules() {
+  if (rembgBackend === "bria") {
+    return ["torch", "torchvision", "transformers", "kornia", "PIL"];
+  }
+  return ["rembg"];
+}
+
+function canFindBackgroundRemovalDependencies(candidate) {
+  const modules = rembgProbeModules();
   const probe = spawnSync(
     executablePath(candidate),
-    ["-c", "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('rembg') else 1)"],
+    [
+      "-c",
+      [
+        "import importlib.util, sys",
+        "modules = sys.argv[1].split(',')",
+        "missing = [name for name in modules if importlib.util.find_spec(name) is None]",
+        "sys.stderr.write('missing modules: ' + ', '.join(missing) if missing else '')",
+        "sys.exit(1 if missing else 0)"
+      ].join("; "),
+      modules.join(",")
+    ],
     {
       encoding: "utf8",
       timeout: rembgProbeTimeoutMs,
@@ -136,7 +162,7 @@ function canFindRembgPackage(candidate) {
       probe.error?.message ||
       cleanText(probe.stderr) ||
       cleanText(probe.stdout) ||
-      (probe.status === 1 ? "rembg package not found" : probe.status ? `exit code ${probe.status}` : "")
+      (probe.status === 1 ? `${rembgBackend} dependencies not found` : probe.status ? `exit code ${probe.status}` : "")
   };
 }
 
@@ -154,10 +180,10 @@ function resolveRembgPython() {
       continue;
     }
 
-    const probe = canFindRembgPackage(candidate);
+    const probe = canFindBackgroundRemovalDependencies(candidate);
     if (probe.ok) return { python: candidate, diagnostics };
 
-    diagnostics.push(`${candidate}: rembg package check failed${probe.error ? ` (${probe.error})` : ""}`);
+    diagnostics.push(`${candidate}: ${rembgBackend} dependency check failed${probe.error ? ` (${probe.error})` : ""}`);
   }
 
   return { python: "", diagnostics };
@@ -588,11 +614,16 @@ const rembgStats = {
   queued: 0,
   processed: 0,
   failed: 0,
+  totalWallSeconds: 0,
+  totalCpuSeconds: 0,
+  totalEnergyJoules: 0,
+  totalEstimatedEnergyJoules: 0,
   lastQueuedAt: null,
   lastStartedAt: null,
   lastFinishedAt: null,
   lastImageId: null,
   lastOutputPath: null,
+  lastMetrics: null,
   lastError: null
 };
 
@@ -619,12 +650,34 @@ async function productImageProcessedColumn() {
 
 function runRembg(sourcePath, outputPath) {
   return new Promise((resolve, reject) => {
-    const args = [projectPath(rembgScript), sourcePath, outputPath];
+    const args = [
+      projectPath(rembgScript),
+      sourcePath,
+      outputPath,
+      "--backend",
+      rembgBackend,
+      "--device",
+      rembgDevice,
+      "--image-size",
+      String(rembgBriaImageSize)
+    ];
     if (rembgModel) {
       args.push("--model", rembgModel);
     }
+    if (rembgMetricsEnabled) {
+      args.push("--metrics");
+    }
 
-    const child = spawn(projectPath(rembgPython), args, {
+    const child = spawn(executablePath(rembgPython), args, {
+      env: {
+        ...process.env,
+        REMBG_BACKEND: rembgBackend,
+        REMBG_MODEL: rembgModel,
+        REMBG_DEVICE: rembgDevice,
+        REMBG_BRIA_IMAGE_SIZE: String(rembgBriaImageSize),
+        REMBG_METRICS: rembgMetricsEnabled ? "true" : "false",
+        REMBG_ESTIMATED_CPU_WATTS: String(rembgEstimatedCpuWatts)
+      },
       windowsHide: true
     });
     let stderr = "";
@@ -646,13 +699,60 @@ function runRembg(sourcePath, outputPath) {
     });
     child.on("close", (code) => {
       clearTimeout(timeout);
+      const metrics = parseRembgMetrics(stdout);
       if (code === 0) {
-        resolve({ stdout, stderr });
+        resolve({ stdout, stderr, metrics });
         return;
       }
-      reject(new Error(stderr || stdout || `rembg exited with code ${code}`));
+      const error = new Error(stderr || stdout || `rembg exited with code ${code}`);
+      error.metrics = metrics;
+      reject(error);
     });
   });
+}
+
+function parseRembgMetrics(stdout) {
+  const metricsLine = String(stdout || "")
+    .split(/\r?\n/)
+    .reverse()
+    .find((line) => line.startsWith("REMBG_METRICS "));
+
+  if (!metricsLine) return null;
+
+  try {
+    return JSON.parse(metricsLine.slice("REMBG_METRICS ".length));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function recordRembgMetrics(metrics) {
+  if (!metrics) return;
+
+  rembgStats.lastMetrics = metrics;
+  rembgStats.totalWallSeconds += Number(metrics.wallSeconds || 0);
+  rembgStats.totalCpuSeconds += Number(metrics.cpuSeconds || 0);
+  const energyJoules = Number(metrics.energyJoules || metrics.estimatedEnergyJoules || 0);
+  rembgStats.totalEnergyJoules += energyJoules;
+  rembgStats.totalEstimatedEnergyJoules += energyJoules;
+}
+
+function logRembgMetrics(imageId, metrics) {
+  if (!metrics) return;
+
+  const details = [
+    `backend=${metrics.backend || rembgBackend}`,
+    `model=${metrics.model || rembgModel}`,
+    `device=${metrics.device || rembgDevice}`,
+    `wall=${metrics.wallSeconds ?? "?"}s`,
+    `cpu=${metrics.cpuSeconds ?? "?"}s`,
+    `avgPower=${metrics.averageWatts ?? "?"}W`,
+    `energy=${metrics.energyJoules ?? metrics.estimatedEnergyJoules ?? "?"}J`,
+    `powerSource=${metrics.powerSource || "unknown"}`,
+    `maxRss=${metrics.maxRssMb ?? "?"}MB`
+  ];
+
+  console.info(`Background removal power metrics for image ${imageId}: ${details.join("; ")}`);
 }
 
 async function processProductImageWithRembg(imageRecord) {
@@ -690,7 +790,10 @@ async function processProductImageWithRembg(imageRecord) {
   const processedPath = path.join(REMBG_UPLOAD_DIR, fileName);
   const publicProcessedPath = `/uploads/rembg/${fileName}`;
 
-  await runRembg(sourcePath, processedPath);
+  const runResult = await runRembg(sourcePath, processedPath);
+  const metrics = runResult.metrics || parseRembgMetrics(runResult.stdout);
+  recordRembgMetrics(metrics);
+  logRembgMetrics(imageRecord.id, metrics);
 
   const stats = await fs.promises.stat(processedPath);
   if (!stats.size) {
@@ -715,7 +818,7 @@ async function processProductImageWithRembg(imageRecord) {
     return null;
   }
 
-  return publicProcessedPath;
+  return { path: publicProcessedPath, metrics };
 }
 
 async function runBackgroundRemovalQueue() {
@@ -728,17 +831,21 @@ async function runBackgroundRemovalQueue() {
       rembgStats.lastStartedAt = new Date().toISOString();
       rembgStats.lastImageId = imageRecord?.id || null;
       try {
-        const processedPath = await processProductImageWithRembg(imageRecord);
+        const processed = await processProductImageWithRembg(imageRecord);
         rembgStats.lastFinishedAt = new Date().toISOString();
-        if (processedPath) {
+        if (processed?.path) {
           rembgStats.processed += 1;
-          rembgStats.lastOutputPath = processedPath;
+          rembgStats.lastOutputPath = processed.path;
+          rembgStats.lastMetrics = processed.metrics || rembgStats.lastMetrics;
           rembgStats.lastError = null;
-          console.info(`rembg image processing completed for image ${imageRecord.id}: ${processedPath}`);
+          console.info(`Background removal completed for image ${imageRecord.id}: ${processed.path}`);
         }
       } catch (error) {
+        recordRembgMetrics(error.metrics);
+        logRembgMetrics(imageRecord?.id, error.metrics);
         rembgStats.failed += 1;
         rembgStats.lastFinishedAt = new Date().toISOString();
+        rembgStats.lastMetrics = error.metrics || rembgStats.lastMetrics;
         rembgStats.lastError = error.message;
         console.error(`rembg image processing failed for image ${imageRecord?.id}: ${error.message}`);
       }
@@ -1880,7 +1987,12 @@ app.get("/api/health", async (request, response) => {
         configuredPython: process.env.REMBG_PYTHON || null,
         script: rembgScriptPath || null,
         scriptExists: rembgScriptExists,
+        backend: rembgBackend,
         model: rembgModel || null,
+        device: rembgDevice,
+        briaImageSize: rembgBriaImageSize,
+        metricsEnabled: rembgMetricsEnabled,
+        estimatedCpuWatts: rembgEstimatedCpuWatts,
         timeoutMs: rembgTimeoutMs,
         probeTimeoutMs: rembgProbeTimeoutMs,
         startupRetryLimit: rembgStartupRetryLimit,
