@@ -69,6 +69,17 @@ export function AddProductModal({
       });
   }, []);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setFormData(editingProduct || emptyProductForm());
+    setCurrentStep('basic');
+    setUnsavedChanges(false);
+    setSubmitError(null);
+    setArtLookup(null);
+    setLookupLoading(false);
+  }, [editingProduct, isOpen]);
+
   const handleFieldChange = useCallback((field: keyof Product, value: any) => {
     setFormData((prev) => ({
       ...prev,

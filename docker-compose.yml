@@ -33,8 +33,6 @@ services:
     build:
       context: .
       target: backend
-      args:
-        REMBG_PRELOAD_MODEL: ${REMBG_PRELOAD_MODEL:-false}
     restart: unless-stopped
     init: true
     environment:
@@ -60,23 +58,8 @@ services:
       DEFAULT_OWNER_PHONE: ${DEFAULT_OWNER_PHONE:-+998000000001}
       DEFAULT_OWNER_PASSWORD_HASH: ${DEFAULT_OWNER_PASSWORD_HASH:-}
       DEFAULT_BRAND_NAME: ${DEFAULT_BRAND_NAME:-Unbranded}
-      REMBG_ENABLED: ${REMBG_ENABLED:-true}
-      REMBG_PYTHON: ${REMBG_PYTHON:-/app/.venv/bin/python}
-      REMBG_SCRIPT: ${REMBG_SCRIPT:-/app/scripts/remove_background.py}
-      REMBG_BACKEND: ${REMBG_BACKEND:-bria}
-      REMBG_DEVICE: ${REMBG_DEVICE:-cpu}
-      REMBG_BRIA_IMAGE_SIZE: ${REMBG_BRIA_IMAGE_SIZE:-1024}
-      REMBG_METRICS: ${REMBG_METRICS:-true}
-      REMBG_ESTIMATED_CPU_WATTS: ${REMBG_ESTIMATED_CPU_WATTS:-35}
-      REMBG_TIMEOUT_MS: ${REMBG_TIMEOUT_MS:-300000}
-      REMBG_MODEL: ${REMBG_MODEL:-briaai/RMBG-2.0}
-      REMBG_STARTUP_RETRY_LIMIT: ${REMBG_STARTUP_RETRY_LIMIT:-50}
-      U2NET_HOME: /app/.u2net
-      HF_HOME: /app/.cache/huggingface
-      HF_TOKEN: ${HF_TOKEN:-}
     volumes:
       - uploads:/app/public/uploads
-      - hf_cache:/app/.cache/huggingface
     depends_on:
       mysql:
         condition: service_healthy
@@ -123,8 +106,6 @@ services:
     build:
       context: .
       target: bot
-      args:
-        REMBG_PRELOAD_MODEL: ${REMBG_PRELOAD_MODEL:-false}
     restart: unless-stopped
     init: true
     environment:
@@ -178,7 +159,6 @@ services:
 volumes:
   mysql_data:
   uploads:
-  hf_cache:
   caddy_data:
   caddy_config:
 

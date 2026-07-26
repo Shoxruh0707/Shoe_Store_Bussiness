@@ -9,41 +9,18 @@ FROM node:22-bookworm-slim AS backend
 WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
-    PORT=3000 \
-    REMBG_ENABLED=true \
-    REMBG_PYTHON=/app/.venv/bin/python \
-    REMBG_SCRIPT=/app/scripts/remove_background.py \
-    REMBG_BACKEND=bria \
-    REMBG_DEVICE=cpu \
-    REMBG_BRIA_IMAGE_SIZE=1024 \
-    REMBG_METRICS=true \
-    REMBG_ESTIMATED_CPU_WATTS=35 \
-    REMBG_TIMEOUT_MS=300000 \
-    REMBG_MODEL=briaai/RMBG-2.0 \
-    U2NET_HOME=/app/.u2net \
-    HF_HOME=/app/.cache/huggingface
+    PORT=3000
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
-        libgomp1 \
-        python3 \
-        python3-venv \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=backend-deps /app/node_modules ./node_modules
 COPY package*.json ./
 COPY server.js ./
 COPY src ./src
-COPY scripts/requirements-rembg.txt ./scripts/requirements-rembg.txt
-COPY scripts/preload_background_model.py ./scripts/preload_background_model.py
-ARG REMBG_PRELOAD_MODEL=false
-RUN mkdir -p /app/.u2net \
-    && python3 -m venv /app/.venv \
-    && /app/.venv/bin/python -m pip install --upgrade pip setuptools wheel \
-    && /app/.venv/bin/python -m pip install --no-cache-dir -r ./scripts/requirements-rembg.txt \
-    && if [ "$REMBG_PRELOAD_MODEL" = "true" ]; then /app/.venv/bin/python ./scripts/preload_background_model.py; fi
 COPY scripts ./scripts
 COPY public ./public
-RUN mkdir -p public/uploads public/uploads/temp public/uploads/rembg /app/.u2net /app/.cache/huggingface && chown -R node:node /app
+RUN mkdir -p public/uploads public/uploads/temp && chown -R node:node /app
 USER node
 EXPOSE 3000
 CMD ["npm", "start"]

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { Product } from '@/lib/api';
-import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import { STOCK_STATUS, LOW_STOCK_THRESHOLD } from '@/lib/constants';
 
 interface ProductDrawerProps {
@@ -10,6 +10,8 @@ interface ProductDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   canViewLandingPrice?: boolean;
+  canEditProduct?: boolean;
+  onEdit?: (product: Product) => void;
 }
 
 function getStockStatus(inventory: { size: number; quantity: number }[]) {
@@ -28,17 +30,74 @@ export function ProductDrawer({
   isOpen,
   onClose,
   canViewLandingPrice = true,
+  canEditProduct = false,
+  onEdit,
 }: ProductDrawerProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const imageScrollerRef = useRef<HTMLDivElement>(null);
+  const thumbnailRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const images = product?.images || [];
+  const productKey = product?.variantId || product?.id || null;
+
+  useEffect(() => {
+    setCurrentImageIndex(0);
+    imageScrollerRef.current?.scrollTo({ left: 0 });
+  }, [productKey]);
+
+  useEffect(() => {
+    if (currentImageIndex >= images.length) {
+      setCurrentImageIndex(Math.max(images.length - 1, 0));
+    }
+  }, [currentImageIndex, images.length]);
 
   if (!product) return null;
 
-  const images = product.images || [];
-  const currentImage = images[currentImageIndex];
   const stockInfo = getStockStatus(product.inventory);
   const totalStock = getTotalStock(product.inventory);
   const sortedInventory = [...product.inventory].sort((a, b) => a.size - b.size);
   const boxStock = (product.boxStock || []).filter((item) => item.quantity > 0);
+
+  function scrollToImage(index: number) {
+    const nextIndex = (index + images.length) % images.length;
+    const scroller = imageScrollerRef.current;
+
+    setCurrentImageIndex(nextIndex);
+    if (scroller) {
+      scroller.scrollTo({
+        left: nextIndex * scroller.clientWidth,
+        behavior: 'smooth',
+      });
+    }
+    thumbnailRefs.current[nextIndex]?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+      inline: 'center',
+    });
+  }
+
+  function handleImageScroll() {
+    const scroller = imageScrollerRef.current;
+    if (!scroller?.clientWidth) return;
+
+    const nextIndex = Math.max(
+      0,
+      Math.min(images.length - 1, Math.round(scroller.scrollLeft / scroller.clientWidth))
+    );
+    if (nextIndex !== currentImageIndex) {
+      setCurrentImageIndex(nextIndex);
+    }
+  }
+
+  function handleImageWheel(event: WheelEvent<HTMLDivElement>) {
+    if (images.length <= 1) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    imageScrollerRef.current?.scrollBy({
+      left: event.deltaX || event.deltaY,
+      behavior: 'auto',
+    });
+  }
 
   return (
     <>
@@ -62,12 +121,24 @@ export function ProductDrawer({
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
               Mahsulot tafsilotlari
             </h2>
-            <button
-              onClick={onClose}
-              className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
-            >
-              <X className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-            </button>
+            <div className="flex items-center gap-2">
+              {canEditProduct && onEdit && (
+                <button
+                  onClick={() => onEdit(product)}
+                  className="inline-flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
+                >
+                  <Pencil className="h-4 w-4" />
+                  Tahrirlash
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
+                aria-label="Yopish"
+              >
+                <X className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+              </button>
+            </div>
           </div>
 
           {/* Content */}
@@ -78,18 +149,23 @@ export function ProductDrawer({
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
                   Rasmlar
                 </h3>
-                <div className="relative overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800">
-                  {currentImage ? (
-                    <img
-                      src={currentImage.path || ''}
-                      alt={product.name}
-                      className="w-full h-64 object-cover"
-                    />
-                  ) : (
-                    <div className="h-64 flex items-center justify-center text-gray-400">
-                      Rasm yo'q
+                <div
+                  ref={imageScrollerRef}
+                  onScroll={handleImageScroll}
+                  onWheel={handleImageWheel}
+                  className="relative flex h-64 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-contain rounded-lg bg-gray-100 scroll-smooth dark:bg-gray-800"
+                  style={{ scrollbarWidth: 'none' }}
+                >
+                  {images.map((image, index) => (
+                    <div key={`${image.path || index}-${index}`} className="h-64 w-full flex-none snap-center">
+                      <img
+                        src={image.path || ''}
+                        alt={`${product.name} ${index + 1}`}
+                        className="h-full w-full object-cover"
+                        draggable={false}
+                      />
                     </div>
-                  )}
+                  ))}
                 </div>
 
                 {/* Image Counter & Controls */}
@@ -100,14 +176,16 @@ export function ProductDrawer({
                     </span>
                     <div className="flex gap-1">
                       <button
-                        onClick={() => setCurrentImageIndex((i) => (i - 1 + images.length) % images.length)}
+                        onClick={() => scrollToImage(currentImageIndex - 1)}
                         className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        aria-label="Oldingi rasm"
                       >
                         <ChevronLeft className="h-4 w-4 text-gray-600 dark:text-gray-400" />
                       </button>
                       <button
-                        onClick={() => setCurrentImageIndex((i) => (i + 1) % images.length)}
+                        onClick={() => scrollToImage(currentImageIndex + 1)}
                         className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        aria-label="Keyingi rasm"
                       >
                         <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
                       </button>
@@ -117,16 +195,20 @@ export function ProductDrawer({
 
                 {/* Thumbnails */}
                 {images.length > 1 && (
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 overflow-x-auto overscroll-x-contain pb-1">
                     {images.map((img, idx) => (
                       <button
                         key={idx}
-                        onClick={() => setCurrentImageIndex(idx)}
+                        ref={(node) => {
+                          thumbnailRefs.current[idx] = node;
+                        }}
+                        onClick={() => scrollToImage(idx)}
                         className={`h-12 w-12 flex-shrink-0 overflow-hidden rounded border-2 transition-colors ${
                           idx === currentImageIndex
                             ? 'border-blue-500'
                             : 'border-gray-200 dark:border-gray-700'
                         }`}
+                        aria-label={`Rasm ${idx + 1}`}
                       >
                         <img
                           src={img.path || ''}

@@ -70,12 +70,6 @@ Set all placeholder values. Important notes:
 - `SESSION_SECRET` must be a long random secret.
 - `TELEGRAM_BOT_TOKEN` must be the current token from BotFather.
 - `TELEGRAM_BOT_USERNAME` must not include `@`.
-- `REMBG_BACKEND=bria` enables BRIA RMBG on CPU for product-image background
-  removal. BRIA model weights are licensed for non-commercial use unless you
-  have a commercial BRIA agreement.
-- Set `HF_TOKEN` only after accepting the BRIA model terms on Hugging Face.
-- `REMBG_METRICS=true` logs wall time, CPU seconds, estimated energy, average
-  watts, and peak memory per processed image.
 
 Generate secrets with:
 
@@ -124,65 +118,6 @@ The expected response is:
 
 ```json
 {"ok":true}
-```
-
-To verify background removal specifically:
-
-```bash
-docker compose exec backend /app/.venv/bin/python -c "import torch, transformers; print('bria deps ok')"
-docker compose exec backend test -f /app/scripts/remove_background.py
-curl --fail --show-error "https://inventory.example.com/api/health?debug=rembg"
-```
-
-If the backend logs say background removal is enabled but unavailable, check the
-debug health response and the startup warning. In this Docker deployment,
-`REMBG_PYTHON` should be `/app/.venv/bin/python` and `REMBG_SCRIPT` should be
-`/app/scripts/remove_background.py`.
-
-To watch BRIA processing and power telemetry during an upload:
-
-```bash
-docker compose logs -f backend | grep -E "Background removal|power metrics"
-```
-
-When Linux RAPL energy counters are readable at `/sys/class/powercap`, the log
-uses measured package energy. On cloud hosts where those counters are hidden,
-the log uses the configured `REMBG_ESTIMATED_CPU_WATTS` estimate.
-
-To pre-download the BRIA model during build after `HF_TOKEN` is configured:
-
-```bash
-REMBG_PRELOAD_MODEL=true docker compose build backend bot
-docker compose up -d
-```
-
-If you run the app directly on Ubuntu without Docker, do not use the `/app/...`
-paths from the Docker example. From the project directory, create and use a
-local venv instead:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y python3-venv libgomp1
-python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip setuptools wheel
-.venv/bin/python -m pip install -r scripts/requirements-rembg.txt
-```
-
-Use these values in `.env` for direct Ubuntu runs:
-
-```env
-REMBG_ENABLED=true
-REMBG_PYTHON=.venv/bin/python
-REMBG_SCRIPT=scripts/remove_background.py
-REMBG_BACKEND=bria
-REMBG_MODEL=briaai/RMBG-2.0
-REMBG_DEVICE=cpu
-REMBG_BRIA_IMAGE_SIZE=1024
-REMBG_METRICS=true
-REMBG_ESTIMATED_CPU_WATTS=35
-REMBG_TIMEOUT_MS=300000
-REMBG_STARTUP_RETRY_LIMIT=50
-HF_TOKEN=
 ```
 
 ## 6. Telegram Configuration

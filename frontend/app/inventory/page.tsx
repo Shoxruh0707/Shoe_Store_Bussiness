@@ -227,6 +227,13 @@ export default function InventoryPage() {
           setSelectedProduct(null);
         }}
         canViewLandingPrice={canManageInventory}
+        canEditProduct={canManageInventory}
+        onEdit={(product) => {
+          setSelectedProduct(null);
+          setIsDrawerOpen(false);
+          setEditingProduct(product);
+          setIsAddModalOpen(true);
+        }}
       />
 
       {/* Add/Edit Modal */}

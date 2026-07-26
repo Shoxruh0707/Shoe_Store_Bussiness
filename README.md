@@ -18,29 +18,21 @@ Inventory web app for managing shoe products, stock, Telegram authentication, an
    npm install
    ```
 
-2. Install the Python background-removal dependencies once:
+2. Make sure `.env` exists and has your local values.
 
-   ```powershell
-   py -3.11 -m venv .venv
-   .venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
-   .venv\Scripts\python.exe -m pip install -r scripts\requirements-rembg.txt
-   ```
-
-3. Make sure `.env` exists and has your local values.
-
-4. Start the backend:
+3. Start the backend:
 
    ```powershell
    npm start
    ```
 
-5. Start the frontend in a second terminal:
+4. Start the frontend in a second terminal:
 
    ```powershell
    npm run frontend:dev
    ```
 
-6. Start the Telegram bot in another terminal when you need Telegram auth:
+5. Start the Telegram bot in another terminal when you need Telegram auth:
 
    ```powershell
    npm run bot
@@ -215,19 +207,6 @@ DEFAULT_STORE_NAME=Default Store
 DEFAULT_OWNER_PHONE=+998000000001
 
 DEFAULT_BRAND_NAME=Unbranded
-
-REMBG_ENABLED=true
-REMBG_PYTHON=.venv\Scripts\python.exe
-REMBG_SCRIPT=scripts\remove_background.py
-REMBG_BACKEND=bria
-REMBG_MODEL=briaai/RMBG-2.0
-REMBG_DEVICE=cpu
-REMBG_BRIA_IMAGE_SIZE=1024
-REMBG_METRICS=true
-REMBG_ESTIMATED_CPU_WATTS=35
-REMBG_TIMEOUT_MS=300000
-REMBG_STARTUP_RETRY_LIMIT=50
-HF_TOKEN=
 ```
 
 Notes:
@@ -241,20 +220,6 @@ Notes:
 - `SESSION_SECRET` signs the internal app session cookie created after Telegram verification.
 - `DEFAULT_STORE_ID` is used by the legacy/default product flow.
 - `DEFAULT_BRAND_NAME` is used because the current product form does not ask for brand.
-- `REMBG_PYTHON` and `REMBG_SCRIPT` point the backend to the Python environment
-  and script used for background removal. On direct Ubuntu installs, use
-  `.venv/bin/python` and `scripts/remove_background.py`; Docker uses `/app/...`
-  paths inside the container.
-- `REMBG_BACKEND=bria` uses BRIA RMBG through PyTorch/Transformers on CPU.
-  Switch to `REMBG_BACKEND=rembg` and `REMBG_MODEL=u2net` if you need the
-  smaller legacy backend.
-- `REMBG_METRICS=true` writes per-image CPU/power lines to backend logs. On
-  Linux hosts with readable RAPL counters it reports measured package energy;
-  otherwise it estimates energy from CPU seconds and `REMBG_ESTIMATED_CPU_WATTS`.
-- `HF_TOKEN` is optional, but may be required after accepting BRIA's Hugging
-  Face model terms.
-- `REMBG_STARTUP_RETRY_LIMIT` retries existing unprocessed images when the
-  backend starts, useful after fixing a broken background-removal deployment.
 
 ## Database Setup
 

@@ -76,7 +76,10 @@ function sellerRequestKeyboard(requestId) {
   return {
     inline_keyboard: [
       [
-        { text: "Tasdiqlash", callback_data: `seller_request:approve:${requestId}` },
+        { text: "Menejer qilish", callback_data: `seller_request:approve_manager:${requestId}` },
+        { text: "Sotuvchi qilish", callback_data: `seller_request:approve_staff:${requestId}` }
+      ],
+      [
         { text: "Rad etish", callback_data: `seller_request:reject:${requestId}` }
       ]
     ]
@@ -246,21 +249,46 @@ async function showStoreUsers(chatId, from) {
     const selfLabel = user.id === ownerStore.ownerUserId ? " (siz)" : "";
     return `${index + 1}. ${user.fname} ${user.lname}${selfLabel} - ${storeRoleLabel(user.storeRole)} - ${user.phoneNumber}`;
   });
-  const deleteRows = users
+  const managementRows = users
     .filter((user) => user.id !== ownerStore.ownerUserId)
-    .map((user) => [
-      {
-        text: `O'chirish: ${user.fname} ${user.lname}`.slice(0, 64),
-        callback_data: `user_delete:confirm:${user.id}`
+    .flatMap((user) => {
+      const fullName = `${user.fname} ${user.lname}`.trim();
+      const rows = [];
+
+      if (user.storeRole !== "manager") {
+        rows.push([
+          {
+            text: `Menejer qilish: ${fullName}`.slice(0, 64),
+            callback_data: `user_role:manager:${user.id}`
+          }
+        ]);
       }
-    ]);
+
+      if (user.storeRole !== "staff") {
+        rows.push([
+          {
+            text: `Sotuvchi qilish: ${fullName}`.slice(0, 64),
+            callback_data: `user_role:staff:${user.id}`
+          }
+        ]);
+      }
+
+      rows.push([
+        {
+          text: `O'chirish: ${fullName}`.slice(0, 64),
+          callback_data: `user_delete:confirm:${user.id}`
+        }
+      ]);
+
+      return rows;
+    });
 
   await sendMessage(
     chatId,
     `${ownerStore.storeName} foydalanuvchilari:\n\n${lines.join("\n") || "Foydalanuvchilar yo'q."}`,
     {
       inline_keyboard: [
-        ...deleteRows,
+        ...managementRows,
         [{ text: "Bosh sahifa", callback_data: "home" }]
       ]
     }
@@ -296,6 +324,58 @@ async function confirmDeleteStoreUser(chatId, from, userId) {
     `${user.fname} ${user.lname} foydalanuvchisini inventar kirishidan va bazadan o'chirasizmi?`,
     userDeleteConfirmKeyboard(user.id)
   );
+}
+
+async function changeStoreUserRole(chatId, from, userId, nextRole) {
+  const ownerStore = await ownerStoreForTelegramId(from.id);
+  if (!ownerStore) {
+    await sendMessage(chatId, "Bu amal faqat do'kon egasi uchun mavjud. /start ni yuboring.");
+    return;
+  }
+
+  if (!["manager", "staff"].includes(nextRole)) {
+    await sendMessage(chatId, "Foydalanuvchi roli noto'g'ri.");
+    return;
+  }
+
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [[user]] = await connection.execute(
+      `SELECT u.id, u.fname, u.lname, su.role AS storeRole
+       FROM store_users su
+       INNER JOIN users u ON u.id = su.user_id
+       WHERE su.store_id = ?
+         AND u.id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [ownerStore.id, userId]
+    );
+
+    if (!user || user.id === ownerStore.ownerUserId || user.storeRole === "owner") {
+      await connection.rollback();
+      await sendMessage(chatId, "Bu foydalanuvchining rolini o'zgartirib bo'lmaydi.");
+      await showStoreUsers(chatId, from);
+      return;
+    }
+
+    await connection.execute("UPDATE store_users SET role = ? WHERE user_id = ? AND store_id = ?", [
+      nextRole,
+      user.id,
+      ownerStore.id
+    ]);
+    await connection.commit();
+
+    await sendMessage(chatId, `${user.fname} ${user.lname} endi ${storeRoleLabel(nextRole)}.`);
+    await showStoreUsers(chatId, from);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 async function deleteStoreUser(chatId, from, userId) {
@@ -571,6 +651,8 @@ async function submitSellerStoreRequest(chatId, userId, storeName) {
 }
 
 async function handleSellerRequestDecision(chatId, from, action, requestId) {
+  const isApproved = ["approve_manager", "approve_staff"].includes(action);
+  const approvedRole = action === "approve_manager" ? "manager" : "staff";
   const owner = await findUserByTelegramId(from.id);
   if (!owner?.id) {
     await sendMessage(chatId, "Do'kon egasi akkaunti topilmadi. /start ni yuboring.");
@@ -622,11 +704,12 @@ async function handleSellerRequestDecision(chatId, from, action, requestId) {
     storeName = request.storeName;
     sellerName = request.sellerName;
 
-    if (action === "approve") {
+    if (isApproved) {
       await connection.execute(
-        `INSERT IGNORE INTO store_users (user_id, store_id, role)
-         VALUES (?, ?, 'staff')`,
-        [request.sellerUserId, request.storeId]
+        `INSERT INTO store_users (user_id, store_id, role)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE role = VALUES(role)`,
+        [request.sellerUserId, request.storeId, approvedRole]
       );
     }
 
@@ -634,7 +717,7 @@ async function handleSellerRequestDecision(chatId, from, action, requestId) {
       `UPDATE seller_store_requests
        SET status = ?, resolved_at = NOW(), resolved_by_user_id = ?
        WHERE id = ?`,
-      [action === "approve" ? "approved" : "rejected", owner.id, requestId]
+      [isApproved ? "approved" : "rejected", owner.id, requestId]
     );
 
     await connection.commit();
@@ -645,15 +728,20 @@ async function handleSellerRequestDecision(chatId, from, action, requestId) {
     connection.release();
   }
 
-  await sendMessage(chatId, `${sellerName} ${storeName} uchun ${action === "approve" ? "tasdiqlandi" : "rad etildi"}.`);
+  await sendMessage(
+    chatId,
+    `${sellerName} ${storeName} uchun ${
+      isApproved ? `${storeRoleLabel(approvedRole)} sifatida tasdiqlandi` : "rad etildi"
+    }.`
+  );
   if (sellerTelegramId) {
     await sendMessage(
       sellerTelegramId,
-      action === "approve"
-        ? `${storeName} do'koniga qo'shilish so'rovingiz tasdiqlandi. Endi inventarni ochishingiz mumkin.`
+      isApproved
+        ? `${storeName} do'koniga qo'shilish so'rovingiz ${storeRoleLabel(approvedRole)} sifatida tasdiqlandi. Endi inventarni ochishingiz mumkin.`
         : `${storeName} do'koniga qo'shilish so'rovingiz rad etildi.`
       ,
-      action === "approve" ? webAppKeyboard() : undefined
+      isApproved ? webAppKeyboard() : undefined
     );
   }
 }
@@ -816,6 +904,18 @@ async function handleCallback(callbackQuery) {
     return;
   }
 
+  if (data.startsWith("user_role:")) {
+    const [, nextRole, userIdText] = data.split(":");
+    const userId = Number(userIdText);
+    if (!["manager", "staff"].includes(nextRole) || !Number.isInteger(userId)) {
+      await sendMessage(chatId, "Foydalanuvchi rolini o'zgartirish amali noto'g'ri.");
+      return;
+    }
+
+    await changeStoreUserRole(chatId, callbackQuery.from, userId, nextRole);
+    return;
+  }
+
   if (data.startsWith("user_delete:")) {
     const [, action, userIdText] = data.split(":");
     const userId = Number(userIdText);
@@ -836,7 +936,7 @@ async function handleCallback(callbackQuery) {
   if (data.startsWith("seller_request:")) {
     const [, action, requestIdText] = data.split(":");
     const requestId = Number(requestIdText);
-    if (!["approve", "reject"].includes(action) || !Number.isInteger(requestId)) {
+    if (!["approve_manager", "approve_staff", "reject"].includes(action) || !Number.isInteger(requestId)) {
       await sendMessage(chatId, "Sotuvchi so'rovi amali noto'g'ri.");
       return;
     }
