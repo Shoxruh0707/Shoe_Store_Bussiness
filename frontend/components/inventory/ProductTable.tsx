@@ -165,10 +165,10 @@ function MobileProductCard({
                   </span>
                 ))
               ) : (
-                <span className="text-[10px] text-gray-500 dark:text-gray-400">Razmer yo'q</span>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400">Tugagan</span>
               )}
             </div>
-            {existingSizes.length > 0 && (
+            {(existingSizes.length > 0 || boxes.quantity === 0) && (
               <span className={`flex-shrink-0 rounded px-2 py-0.5 text-[11px] font-medium ${stockInfo.color}`}>
                 {stockInfo.label}
               </span>
@@ -280,7 +280,7 @@ function DesktopProductTable({
                         </span>
                       ))
                     ) : (
-                      <span className="text-xs text-gray-500 dark:text-gray-400">Qoldiq yo'q</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Tugagan</span>
                     )}
                   </div>
                 </td>
@@ -293,9 +293,11 @@ function DesktopProductTable({
                       </p>
                     </div>
                   )}
-                  <span className={`inline-block rounded px-2.5 py-0.5 text-xs font-medium ${stockInfo.color}`}>
-                    {stockInfo.label}
-                  </span>
+                  {(existingSizes.length > 0 || boxes.quantity === 0) && (
+                    <span className={`inline-block rounded px-2.5 py-0.5 text-xs font-medium ${stockInfo.color}`}>
+                      {stockInfo.label}
+                    </span>
+                  )}
                 </td>
               </tr>
             );

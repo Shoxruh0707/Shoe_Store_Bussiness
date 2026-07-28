@@ -24,6 +24,13 @@ const STEPS: { id: Step; label: string }[] = [
   { id: 'inventory', label: 'Inventar' },
 ];
 
+const hasText = (value: unknown) => String(value || '').trim().length > 0;
+
+const hasPositiveNumber = (value: unknown) => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0;
+};
+
 const emptyProductForm = (): Product => ({
   artNo: '',
   name: '',
@@ -225,6 +232,14 @@ export function AddProductModal({
       setSubmitError('Kamida bitta mavsum tanlang.');
       return;
     }
+    if (!hasPositiveNumber(formData.price)) {
+      setSubmitError('Sotish narxini kiriting.');
+      return;
+    }
+    if (!hasPositiveNumber(formData.landingPrice)) {
+      setSubmitError('Kelish narxini kiriting.');
+      return;
+    }
     if (formData.images.some((image) => image.uploading)) {
       setSubmitError('Rasmlar yuklanishi tugashini kuting.');
       return;
@@ -298,6 +313,27 @@ export function AddProductModal({
         ),
       ]
     : artLookup?.materials || [];
+  const isStepComplete = (step: Step) => {
+    switch (step) {
+      case 'basic':
+        return hasText(formData.artNo) && hasText(formData.type) && formData.seasons.length > 0;
+      case 'details':
+        return hasText(formData.colour) && hasText(formData.material);
+      case 'images':
+        return !hasUploadingImages && !hasFailedImages;
+      case 'pricing':
+        return hasPositiveNumber(formData.price) && hasPositiveNumber(formData.landingPrice);
+      case 'inventory': {
+        const parsedBoxQuantity = Number(formData.box_quantity || 0);
+        const hasValidBoxQuantity =
+          Number.isInteger(parsedBoxQuantity) && parsedBoxQuantity >= 0;
+
+        return hasValidBoxQuantity && (parsedBoxQuantity === 0 || totalInventory > 0);
+      }
+      default:
+        return false;
+    }
+  };
 
   useEffect(() => {
     if (!isOpen || editingProduct) return;
@@ -396,12 +432,12 @@ export function AddProductModal({
                     className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
                       step.id === currentStep
                         ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
-                        : index < currentStepIndex
+                        : index < currentStepIndex && isStepComplete(step.id)
                         ? 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300'
                         : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
                     }`}
                   >
-                    {index < currentStepIndex && '✓'} {step.label}
+                    {index < currentStepIndex && isStepComplete(step.id) && '✓'} {step.label}
                   </button>
                 ))}
               </div>
