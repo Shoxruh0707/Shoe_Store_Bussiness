@@ -8,6 +8,8 @@ const pollTimeoutSeconds = Number(process.env.TELEGRAM_POLL_TIMEOUT_SECONDS || 2
 const defaultPasswordHash =
   process.env.DEFAULT_OWNER_PASSWORD_HASH || "$2b$10$0000000000000000000000000000000000000000000000000000";
 const sessions = new Map();
+const backButtonText = "Ortga";
+const backCallbackData = "back";
 
 if (!token) {
   throw new Error("TELEGRAM_BOT_TOKEN is required.");
@@ -63,18 +65,40 @@ function webAppKeyboard(extraRows = []) {
   };
 }
 
+function backButtonRow(callbackData = backCallbackData) {
+  return [{ text: backButtonText, callback_data: callbackData }];
+}
+
+function inlineBackKeyboard(callbackData = backCallbackData) {
+  return {
+    inline_keyboard: [backButtonRow(callbackData)]
+  };
+}
+
+function withBackButton(rows, callbackData = backCallbackData) {
+  return [...rows, backButtonRow(callbackData)];
+}
+
+function backReplyKeyboard(extraRows = []) {
+  return {
+    keyboard: [...extraRows, [{ text: backButtonText }]],
+    resize_keyboard: true,
+    one_time_keyboard: true
+  };
+}
+
 function accountTypeKeyboard() {
   return {
-    inline_keyboard: [
+    inline_keyboard: withBackButton([
       [{ text: "Sotuvchi", callback_data: "account:seller" }],
       [{ text: "Do'kon egasi", callback_data: "account:store_owner" }]
-    ]
+    ])
   };
 }
 
 function sellerRequestKeyboard(requestId) {
   return {
-    inline_keyboard: [
+    inline_keyboard: withBackButton([
       [
         { text: "Menejer qilish", callback_data: `seller_request:approve_manager:${requestId}` },
         { text: "Sotuvchi qilish", callback_data: `seller_request:approve_staff:${requestId}` }
@@ -82,15 +106,14 @@ function sellerRequestKeyboard(requestId) {
       [
         { text: "Rad etish", callback_data: `seller_request:reject:${requestId}` }
       ]
-    ]
+    ], "back:home")
   };
 }
 
 function ownerHomeKeyboard() {
   return webAppKeyboard([
     [{ text: "Foydalanuvchilar ro'yxati", callback_data: "users:list" }],
-    [{ text: "Profil", callback_data: "profile" }],
-    [{ text: "Yordam", callback_data: "help" }]
+    [{ text: "Profil", callback_data: "profile" }]
   ]);
 }
 
@@ -99,8 +122,46 @@ function userDeleteConfirmKeyboard(userId) {
     inline_keyboard: [
       [
         { text: "Ha, o'chirish", callback_data: `user_delete:delete:${userId}` },
-        { text: "Bekor qilish", callback_data: "users:list" }
+        { text: backButtonText, callback_data: "users:list" }
       ]
+    ]
+  };
+}
+
+function profileKeyboard(user) {
+  const rows = [];
+
+  if (user?.storeRole === "owner") {
+    rows.push([{ text: "Inventarni o'chirish", callback_data: "inventory_delete:confirm" }]);
+  } else if (user?.storeName) {
+    rows.push([{ text: "Inventardan chiqish", callback_data: "seller_leave:confirm" }]);
+  }
+
+  return {
+    inline_keyboard: withBackButton(rows, "back:home")
+  };
+}
+
+function deleteInventoryConfirmKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Ha, o'chirish", callback_data: "inventory_delete:ask_phrase" },
+        { text: "Yo'q, bekor qilish", callback_data: "profile" }
+      ],
+      backButtonRow("profile")
+    ]
+  };
+}
+
+function sellerLeaveConfirmKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Ha, chiqish", callback_data: "seller_leave:leave" },
+        { text: "Yo'q, bekor qilish", callback_data: "profile" }
+      ],
+      backButtonRow("profile")
     ]
   };
 }
@@ -287,10 +348,7 @@ async function showStoreUsers(chatId, from) {
     chatId,
     `${ownerStore.storeName} foydalanuvchilari:\n\n${lines.join("\n") || "Foydalanuvchilar yo'q."}`,
     {
-      inline_keyboard: [
-        ...managementRows,
-        [{ text: "Bosh sahifa", callback_data: "home" }]
-      ]
+      inline_keyboard: withBackButton(managementRows, "back:home")
     }
   );
 }
@@ -428,6 +486,204 @@ async function deleteStoreUser(chatId, from, userId) {
       await showStart(chatId, from);
       return;
     }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+function ownerDeleteConfirmationPhrase(storeName) {
+  return `${storeName} yes`;
+}
+
+async function showProfile(chatId, from) {
+  const user = await findUserByTelegramId(from.id);
+  await sendMessage(
+    chatId,
+    user
+      ? `Profil\n\nIsm: ${user.fname} ${user.lname}\nRol: ${storeRoleLabel(user.storeRole || user.role)}\nDo'kon: ${user.storeName || "Biriktirilmagan"}`
+      : "Profil topilmadi. /start ni yuboring.",
+    profileKeyboard(user)
+  );
+}
+
+async function confirmDeleteInventory(chatId, from) {
+  const ownerStore = await ownerStoreForTelegramId(from.id);
+  if (!ownerStore) {
+    await sendMessage(chatId, "Inventarni faqat do'kon egasi o'chira oladi.", inlineBackKeyboard("profile"));
+    return;
+  }
+
+  await sendMessage(
+    chatId,
+    `${ownerStore.storeName} inventarini o'chirasizmi?\n\nBu do'kon inventari, mahsulot variantlari, sotuv tarixi va do'kon ulanishlarini o'chiradi. Sizning egasi profilingiz ham bazadan o'chiriladi.`,
+    deleteInventoryConfirmKeyboard()
+  );
+}
+
+async function askDeleteInventoryPhrase(chatId, from) {
+  const ownerStore = await ownerStoreForTelegramId(from.id);
+  if (!ownerStore) {
+    await sendMessage(chatId, "Inventarni faqat do'kon egasi o'chira oladi.", inlineBackKeyboard("profile"));
+    return;
+  }
+
+  const confirmationPhrase = ownerDeleteConfirmationPhrase(ownerStore.storeName);
+  sessions.set(chatId, {
+    step: "confirm_delete_inventory",
+    profile: profileFromTelegram(from),
+    ownerUserId: ownerStore.ownerUserId,
+    storeId: ownerStore.id,
+    storeName: ownerStore.storeName,
+    confirmationPhrase,
+    data: {}
+  });
+
+  await sendMessage(
+    chatId,
+    `Oxirgi tasdiq uchun quyidagi matnni aynan yuboring:\n\n${confirmationPhrase}`,
+    backReplyKeyboard()
+  );
+}
+
+async function deleteOwnerInventory(chatId, from, session) {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [[ownerStore]] = await connection.execute(
+      `SELECT u.id AS ownerUserId, s.id AS storeId, s.store_name AS storeName
+       FROM users u
+       INNER JOIN store_users su ON su.user_id = u.id
+       INNER JOIN store s ON s.id = su.store_id
+       WHERE u.id = ?
+         AND s.id = ?
+         AND su.role = 'owner'
+       LIMIT 1
+       FOR UPDATE`,
+      [session.ownerUserId, session.storeId]
+    );
+
+    if (!ownerStore) {
+      await connection.rollback();
+      sessions.delete(chatId);
+      await sendMessage(chatId, "Do'kon egasi yoki inventar topilmadi. /start ni qayta yuboring.");
+      return;
+    }
+
+    await connection.execute(
+      "UPDATE seller_store_requests SET resolved_by_user_id = NULL WHERE resolved_by_user_id = ?",
+      [ownerStore.ownerUserId]
+    );
+    await connection.execute("DELETE FROM seller_store_requests WHERE store_id = ? OR seller_user_id = ?", [
+      ownerStore.storeId,
+      ownerStore.ownerUserId
+    ]);
+    await connection.execute("DELETE FROM sold_products_pair WHERE store_id = ?", [ownerStore.storeId]);
+    await connection.execute("DELETE FROM sold_products_box WHERE store_id = ?", [ownerStore.storeId]);
+    await connection.execute("DELETE FROM inventory WHERE store_id = ?", [ownerStore.storeId]);
+    await connection.execute("DELETE FROM box_stock WHERE store_id = ?", [ownerStore.storeId]);
+    await connection.execute("DELETE FROM product_variant WHERE store_id = ?", [ownerStore.storeId]);
+    await connection.execute("DELETE FROM store_users WHERE store_id = ?", [ownerStore.storeId]);
+    await connection.execute("DELETE FROM store WHERE id = ?", [ownerStore.storeId]);
+    await connection.execute("DELETE FROM users WHERE id = ?", [ownerStore.ownerUserId]);
+
+    await connection.commit();
+    sessions.delete(chatId);
+
+    await sendMessage(chatId, "Inventar o'chirildi. Endi yangi inventar yaratish uchun qayta ro'yxatdan o'ting.", {
+      remove_keyboard: true
+    });
+    await showStart(chatId, from);
+  } catch (error) {
+    await connection.rollback();
+    if (error.code === "ER_ROW_IS_REFERENCED_2") {
+      await sendMessage(
+        chatId,
+        "Inventarni o'chirib bo'lmadi: bazada bog'langan tarix yoki mahsulot yozuvi qoldi. Administrator bilan tekshiring.",
+        inlineBackKeyboard("profile")
+      );
+      return;
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+async function confirmSellerLeaveInventory(chatId, from) {
+  const user = await findUserByTelegramId(from.id);
+  if (!user?.storeName) {
+    await sendMessage(chatId, "Siz hozir hech qaysi inventarga ulanmagansiz.", inlineBackKeyboard("back:home"));
+    return;
+  }
+
+  if (user.storeRole === "owner") {
+    await sendMessage(chatId, "Do'kon egasi inventardan chiqmaydi. Inventarni o'chirish uchun profil menyusidan foydalaning.", inlineBackKeyboard("profile"));
+    return;
+  }
+
+  await sendMessage(
+    chatId,
+    `${user.storeName} inventaridan chiqasizmi?\n\nChiqgandan keyin bot siz uchun qaytadan boshlanadi va boshqa inventarga ulanish uchun ro'yxatdan o'tasiz.`,
+    sellerLeaveConfirmKeyboard()
+  );
+}
+
+async function leaveInventoryAsSeller(chatId, from) {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [[membership]] = await connection.execute(
+      `SELECT u.id AS userId, su.store_id AS storeId, s.store_name AS storeName, su.role AS storeRole
+       FROM users u
+       INNER JOIN store_users su ON su.user_id = u.id
+       INNER JOIN store s ON s.id = su.store_id
+       WHERE u.telegram_id = ?
+       ORDER BY FIELD(su.role, 'owner', 'manager', 'staff'), s.id
+       LIMIT 1
+       FOR UPDATE`,
+      [from.id]
+    );
+
+    if (!membership) {
+      await connection.rollback();
+      await sendMessage(chatId, "Siz hozir hech qaysi inventarga ulanmagansiz.", inlineBackKeyboard("back:home"));
+      return;
+    }
+
+    if (membership.storeRole === "owner") {
+      await connection.rollback();
+      await sendMessage(chatId, "Do'kon egasi inventardan chiqmaydi. Inventarni o'chirish uchun profil menyusidan foydalaning.", inlineBackKeyboard("profile"));
+      return;
+    }
+
+    await connection.execute(
+      "UPDATE seller_store_requests SET resolved_by_user_id = NULL WHERE resolved_by_user_id = ?",
+      [membership.userId]
+    );
+    await connection.execute("DELETE FROM seller_store_requests WHERE seller_user_id = ? AND store_id = ?", [
+      membership.userId,
+      membership.storeId
+    ]);
+    await connection.execute("DELETE FROM store_users WHERE user_id = ? AND store_id = ?", [
+      membership.userId,
+      membership.storeId
+    ]);
+    await connection.execute("UPDATE users SET telegram_id = NULL WHERE id = ?", [membership.userId]);
+
+    await connection.commit();
+    sessions.delete(chatId);
+
+    await sendMessage(chatId, `${membership.storeName} inventaridan chiqdingiz. Bot siz uchun qayta boshlandi.`, {
+      remove_keyboard: true
+    });
+    await showStart(chatId, from);
+  } catch (error) {
+    await connection.rollback();
     throw error;
   } finally {
     connection.release();
@@ -650,6 +906,96 @@ async function submitSellerStoreRequest(chatId, userId, storeName) {
   await sendMessage(chatId, `${store.storeName} uchun so'rovingiz saqlandi, lekin Telegramda do'kon egasi topilmadi. Egasidan tasdiqlashni so'rang.`);
 }
 
+async function promptForSessionStep(chatId, session) {
+  if (session.step === "first_name") {
+    await sendMessage(chatId, "Iltimos, ismingizni yuboring.", backReplyKeyboard());
+    return;
+  }
+
+  if (session.step === "last_name") {
+    await sendMessage(chatId, "Iltimos, familiyangizni yuboring.", backReplyKeyboard());
+    return;
+  }
+
+  if (session.step === "phone") {
+    await sendMessage(
+      chatId,
+      "Iltimos, telefon raqamingizni ulashing.",
+      backReplyKeyboard([[{ text: "Telefon raqamni ulashish", request_contact: true }]])
+    );
+    return;
+  }
+
+  if (session.step === "account_type") {
+    await sendMessage(chatId, "Akkaunt turini tanlang:", accountTypeKeyboard());
+    return;
+  }
+
+  if (session.step === "owner_store_name") {
+    await sendMessage(chatId, "Iltimos, do'kon nomini yuboring.", backReplyKeyboard());
+    return;
+  }
+
+  if (session.step === "seller_store_name") {
+    await sendMessage(chatId, "Qaysi do'konda sotasiz? Iltimos, do'konning aniq nomini yuboring.", backReplyKeyboard());
+    return;
+  }
+
+  if (session.step === "existing_seller_store_name") {
+    await sendMessage(chatId, "Iltimos, do'konning aniq nomini yuboring.", backReplyKeyboard());
+    return;
+  }
+
+  if (session.step === "confirm_delete_inventory") {
+    await sendMessage(
+      chatId,
+      `Oxirgi tasdiq uchun quyidagi matnni aynan yuboring:\n\n${session.confirmationPhrase}`,
+      backReplyKeyboard()
+    );
+  }
+}
+
+async function handleBack(chatId, from) {
+  const session = sessions.get(chatId);
+
+  if (!session) {
+    await showStart(chatId, from);
+    return;
+  }
+
+  if (session.step === "first_name" || session.step === "existing_seller_store_name") {
+    sessions.delete(chatId);
+    await sendMessage(chatId, "Ortga qaytildi. Davom etish uchun /start ni yuboring.", {
+      remove_keyboard: true
+    });
+    return;
+  }
+
+  if (session.step === "confirm_delete_inventory") {
+    sessions.delete(chatId);
+    await showProfile(chatId, from);
+    return;
+  }
+
+  if (session.step === "last_name") {
+    delete session.data.firstName;
+    session.step = "first_name";
+  } else if (session.step === "phone") {
+    delete session.data.lastName;
+    session.step = "last_name";
+  } else if (session.step === "account_type") {
+    delete session.data.phoneNumber;
+    session.step = "phone";
+  } else if (session.step === "owner_store_name" || session.step === "seller_store_name") {
+    delete session.data.userRole;
+    delete session.data.storeRole;
+    session.step = "account_type";
+  }
+
+  sessions.set(chatId, session);
+  await promptForSessionStep(chatId, session);
+}
+
 async function handleSellerRequestDecision(chatId, from, action, requestId) {
   const isApproved = ["approve_manager", "approve_staff"].includes(action);
   const approvedRole = action === "approve_manager" ? "manager" : "staff";
@@ -758,13 +1104,16 @@ async function showStart(chatId, from) {
         existingUserId: user.id,
         data: {}
       });
-      await sendMessage(chatId, "Sotuvchi akkauntingiz hali do'konga ulanmagan. Iltimos, do'konning aniq nomini yuboring.");
+      await sendMessage(
+        chatId,
+        "Sotuvchi akkauntingiz hali do'konga ulanmagan. Iltimos, do'konning aniq nomini yuboring.",
+        backReplyKeyboard()
+      );
       return;
     }
 
     await sendMessage(chatId, "Qaytganingiz bilan.", user.storeRole === "owner" ? ownerHomeKeyboard() : webAppKeyboard([
-      [{ text: "Profil", callback_data: "profile" }],
-      [{ text: "Yordam", callback_data: "help" }]
+      [{ text: "Profil", callback_data: "profile" }]
     ]));
     return;
   }
@@ -776,7 +1125,7 @@ async function showStart(chatId, from) {
   });
 
   await sendMessage(chatId, "Shoe Store Inventory botiga xush kelibsiz.\n\nDo'kon inventarini Telegram orqali boshqaring.", webAppKeyboard());
-  await sendMessage(chatId, "Xush kelibsiz!\n\nAkkaunt yaratamiz.\n\nIltimos, ismingizni yuboring.");
+  await sendMessage(chatId, "Xush kelibsiz!\n\nAkkaunt yaratamiz.\n\nIltimos, ismingizni yuboring.", backReplyKeyboard());
 }
 
 async function handleContact(chatId, from, contact) {
@@ -798,12 +1147,31 @@ async function handleContact(chatId, from, contact) {
   session.step = "account_type";
   sessions.set(chatId, session);
 
-  await sendMessage(chatId, "Akkaunt turini tanlang:", accountTypeKeyboard());
+  await promptForSessionStep(chatId, session);
 }
 
-async function handleRegistrationText(chatId, text) {
+async function handleRegistrationText(chatId, from, text) {
   const session = sessions.get(chatId);
   if (!session) return false;
+
+  if (cleanText(text).toLowerCase() === backButtonText.toLowerCase()) {
+    await handleBack(chatId, from);
+    return true;
+  }
+
+  if (session.step === "confirm_delete_inventory") {
+    if (cleanText(text).toLowerCase() !== cleanText(session.confirmationPhrase).toLowerCase()) {
+      await sendMessage(
+        chatId,
+        `Tasdiq matni mos kelmadi. O'chirish uchun quyidagi matnni aynan yuboring:\n\n${session.confirmationPhrase}`,
+        backReplyKeyboard()
+      );
+      return true;
+    }
+
+    await deleteOwnerInventory(chatId, from, session);
+    return true;
+  }
 
   if (session.step === "first_name") {
     const firstName = cleanText(text);
@@ -814,7 +1182,7 @@ async function handleRegistrationText(chatId, text) {
     session.data.firstName = firstName;
     session.step = "last_name";
     sessions.set(chatId, session);
-    await sendMessage(chatId, "Iltimos, familiyangizni yuboring.");
+    await promptForSessionStep(chatId, session);
     return true;
   }
 
@@ -827,11 +1195,7 @@ async function handleRegistrationText(chatId, text) {
     session.data.lastName = lastName;
     session.step = "phone";
     sessions.set(chatId, session);
-    await sendMessage(chatId, "Iltimos, telefon raqamingizni ulashing.", {
-      keyboard: [[{ text: "Telefon raqamni ulashish", request_contact: true }]],
-      resize_keyboard: true,
-      one_time_keyboard: true
-    });
+    await promptForSessionStep(chatId, session);
     return true;
   }
 
@@ -878,19 +1242,48 @@ async function handleCallback(callbackQuery) {
   const data = callbackQuery.data;
   await answerCallbackQuery(callbackQuery.id);
 
+  if (data === "back:home") {
+    sessions.delete(chatId);
+    await showStart(chatId, callbackQuery.from);
+    return;
+  }
+
+  if (data === backCallbackData) {
+    await handleBack(chatId, callbackQuery.from);
+    return;
+  }
+
   if (data === "profile") {
-    const user = await findUserByTelegramId(callbackQuery.from.id);
-    await sendMessage(
-      chatId,
-      user
-        ? `Profil\n\nIsm: ${user.fname} ${user.lname}\nRol: ${storeRoleLabel(user.storeRole || user.role)}\nDo'kon: ${user.storeName || "Biriktirilmagan"}`
-        : "Profil topilmadi. /start ni yuboring."
-    );
+    await showProfile(chatId, callbackQuery.from);
     return;
   }
 
   if (data === "help") {
-    await sendMessage(chatId, "Telegram ichida web panelni ochish uchun Inventarni ochish tugmasini bosing.");
+    await sendMessage(
+      chatId,
+      "Telegram ichida web panelni ochish uchun Inventarni ochish tugmasini bosing.",
+      inlineBackKeyboard("back:home")
+    );
+    return;
+  }
+
+  if (data === "inventory_delete:confirm") {
+    await confirmDeleteInventory(chatId, callbackQuery.from);
+    return;
+  }
+
+  if (data === "inventory_delete:ask_phrase") {
+    await askDeleteInventoryPhrase(chatId, callbackQuery.from);
+    return;
+  }
+
+  if (data === "seller_leave:confirm") {
+    await confirmSellerLeaveInventory(chatId, callbackQuery.from);
+    return;
+  }
+
+  if (data === "seller_leave:leave") {
+    await leaveInventoryAsSeller(chatId, callbackQuery.from);
     return;
   }
 
@@ -964,13 +1357,13 @@ async function handleCallback(callbackQuery) {
   if (accountType === "store_owner") {
     session.step = "owner_store_name";
     sessions.set(chatId, session);
-    await sendMessage(chatId, "Iltimos, do'kon nomini yuboring.");
+    await promptForSessionStep(chatId, session);
     return;
   }
 
   session.step = "seller_store_name";
   sessions.set(chatId, session);
-  await sendMessage(chatId, "Qaysi do'konda sotasiz? Iltimos, do'konning aniq nomini yuboring.");
+  await promptForSessionStep(chatId, session);
 }
 
 async function handleUpdate(update) {
@@ -988,12 +1381,17 @@ async function handleUpdate(update) {
     return;
   }
 
+  if (message.text && cleanText(message.text).toLowerCase() === backButtonText.toLowerCase()) {
+    await handleBack(chatId, message.from);
+    return;
+  }
+
   if (message.contact) {
     await handleContact(chatId, message.from, message.contact);
     return;
   }
 
-  if (message.text && (await handleRegistrationText(chatId, message.text))) {
+  if (message.text && (await handleRegistrationText(chatId, message.from, message.text))) {
     return;
   }
 
