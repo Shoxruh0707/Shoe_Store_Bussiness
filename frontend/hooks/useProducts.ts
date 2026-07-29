@@ -15,6 +15,7 @@ export interface UseProductsReturn {
   createProduct: (product: Product) => Promise<Product | null>;
   updateProduct: (id: number, product: Product) => Promise<Product | null>;
   updateProductPrices: (payload: PriceUpdatePayload) => Promise<boolean>;
+  openBoxStock: (boxStockId: number) => Promise<Product | null>;
   deleteProduct: (id: number) => Promise<boolean>;
   markProductSold: (payload: SoldProductPayload) => Promise<SoldProductResponse>;
   getTotalStock: () => number;
@@ -124,6 +125,30 @@ export function useProducts(): UseProductsReturn {
     [fetchProducts]
   );
 
+  const openBoxStock = useCallback(
+    async (boxStockId: number): Promise<Product | null> => {
+      try {
+        const result = await api.openBoxStock(boxStockId);
+        const updatedProduct = result.product;
+
+        if (!updatedProduct) {
+          await fetchProducts();
+          return null;
+        }
+
+        const updatedKey = productRowKey(updatedProduct);
+        setProducts((prev) => prev.map((product) => (productRowKey(product) === updatedKey ? updatedProduct : product)));
+        return updatedProduct;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Qutini ochib bo\'lmadi';
+        setError(message);
+        console.error('[v0] Failed to open box stock:', message);
+        throw err;
+      }
+    },
+    [fetchProducts]
+  );
+
   // New sold-product feature code starts.
   const markProductSold = useCallback(
     async (payload: SoldProductPayload): Promise<SoldProductResponse> => {
@@ -181,6 +206,7 @@ export function useProducts(): UseProductsReturn {
     createProduct,
     updateProduct,
     updateProductPrices,
+    openBoxStock,
     deleteProduct,
     markProductSold,
     getTotalStock,

@@ -163,6 +163,16 @@ export interface PriceUpdateResponse {
   lookup?: ProductLookup | null;
 }
 
+export interface OpenBoxStockResponse {
+  opened: {
+    productVariantId: number;
+    productId: number;
+    remainingQuantity: number;
+    inventory: InventoryItem[];
+  };
+  product: Product | null;
+}
+
 export interface AuthSession {
   user: {
     id: number;
@@ -372,6 +382,18 @@ class APIClient {
   async updateProductPrices(payload: PriceUpdatePayload): Promise<PriceUpdateResponse> {
     const response = await this.request<{ data: PriceUpdateResponse }>('POST', '/products/prices', payload);
     return response.data;
+  }
+
+  async openBoxStock(boxStockId: number): Promise<OpenBoxStockResponse> {
+    const response = await this.request<{ data: OpenBoxStockResponse }>(
+      'POST',
+      `/box-stock/${boxStockId}/open`
+    );
+
+    return {
+      ...response.data,
+      product: response.data?.product ? this.normalizeProduct(response.data.product) : null,
+    };
   }
 
   // New sold-product feature code starts.

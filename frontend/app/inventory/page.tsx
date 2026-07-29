@@ -22,6 +22,7 @@ export default function InventoryPage() {
     createProduct,
     updateProduct,
     updateProductPrices,
+    openBoxStock,
     markProductSold,
   } = useProducts();
 
@@ -85,6 +86,25 @@ export default function InventoryPage() {
         setSaleMessage({ type: 'success', text: 'Narxlar muvaffaqiyatli yangilandi.' });
       }
       return saved;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleOpenBoxStock = async (boxStockId: number) => {
+    setIsSubmitting(true);
+    setSaleMessage(null);
+
+    try {
+      const updatedProduct = await openBoxStock(boxStockId);
+      if (updatedProduct) {
+        setSelectedProduct(updatedProduct);
+      }
+      setSaleMessage({ type: 'success', text: 'Bitta quti ochildi va razmerlar qoldig\'i yangilandi.' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Qutini ochib bo\'lmadi.';
+      setSaleMessage({ type: 'error', text: message });
+      throw error;
     } finally {
       setIsSubmitting(false);
     }
@@ -228,6 +248,9 @@ export default function InventoryPage() {
         }}
         canViewLandingPrice={canManageInventory}
         canEditProduct={canManageInventory}
+        canOpenBox={canManageInventory}
+        isOpeningBox={isSubmitting}
+        onOpenBox={handleOpenBoxStock}
         onEdit={(product) => {
           setSelectedProduct(null);
           setIsDrawerOpen(false);

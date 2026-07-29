@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { Product } from '@/lib/api';
-import { X, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Pencil, Plus } from 'lucide-react';
 import { STOCK_STATUS, LOW_STOCK_THRESHOLD } from '@/lib/constants';
 
 interface ProductDrawerProps {
@@ -11,7 +11,10 @@ interface ProductDrawerProps {
   onClose: () => void;
   canViewLandingPrice?: boolean;
   canEditProduct?: boolean;
+  canOpenBox?: boolean;
+  isOpeningBox?: boolean;
   onEdit?: (product: Product) => void;
+  onOpenBox?: (boxStockId: number) => Promise<void>;
 }
 
 function getStockStatus(inventory: { size: number; quantity: number }[]) {
@@ -31,9 +34,13 @@ export function ProductDrawer({
   onClose,
   canViewLandingPrice = true,
   canEditProduct = false,
+  canOpenBox = false,
+  isOpeningBox = false,
   onEdit,
+  onOpenBox,
 }: ProductDrawerProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [openBoxError, setOpenBoxError] = useState<string | null>(null);
   const imageScrollerRef = useRef<HTMLDivElement>(null);
   const thumbnailRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const images = product?.images || [];
@@ -41,6 +48,7 @@ export function ProductDrawer({
 
   useEffect(() => {
     setCurrentImageIndex(0);
+    setOpenBoxError(null);
     imageScrollerRef.current?.scrollTo({ left: 0 });
   }, [productKey]);
 
@@ -56,6 +64,15 @@ export function ProductDrawer({
   const totalStock = getTotalStock(product.inventory);
   const sortedInventory = [...product.inventory].sort((a, b) => a.size - b.size);
   const boxStock = (product.boxStock || []).filter((item) => item.quantity > 0);
+  const firstOpenableBox = boxStock[0] || null;
+  const hasOpenableBox = Boolean(firstOpenableBox);
+  const allSizesUnavailable = sortedInventory.length > 0 && sortedInventory.every((item) => item.quantity === 0);
+  const canPressOpenBox = canOpenBox && Boolean(onOpenBox) && hasOpenableBox && !isOpeningBox;
+  const openBoxButtonClass = !hasOpenableBox
+    ? 'bg-gray-200 text-gray-400 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
+    : allSizesUnavailable
+    ? 'bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700'
+    : 'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700';
 
   function scrollToImage(index: number) {
     const nextIndex = (index + images.length) % images.length;
@@ -97,6 +114,24 @@ export function ProductDrawer({
       left: event.deltaX || event.deltaY,
       behavior: 'auto',
     });
+  }
+
+  async function handleOpenBox() {
+    if (!canPressOpenBox || !firstOpenableBox || !onOpenBox) return;
+
+    const confirmed = window.confirm(
+      `${product?.artNo || 'Mahsulot'} uchun ${firstOpenableBox.sizeRange} qutisini ochasizmi?`
+    );
+    if (!confirmed) return;
+
+    setOpenBoxError(null);
+
+    try {
+      await onOpenBox(firstOpenableBox.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Qutini ochib bo\'lmadi.';
+      setOpenBoxError(message);
+    }
   }
 
   return (
@@ -313,10 +348,29 @@ export function ProductDrawer({
 
               {/* Total Stock Summary */}
               <div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-950">
-                <p className="text-xs text-blue-600 dark:text-blue-400">Jami qoldiq</p>
-                <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
-                  {totalStock}
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">Jami qoldiq</p>
+                    <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+                      {totalStock}
+                    </p>
+                  </div>
+                  {canOpenBox && onOpenBox && (
+                    <button
+                      type="button"
+                      onClick={handleOpenBox}
+                      disabled={!canPressOpenBox}
+                      title={hasOpenableBox ? 'Qutini ochish' : 'Ochilmagan quti yo\'q'}
+                      aria-label={hasOpenableBox ? 'Qutini ochish' : 'Ochilmagan quti yo\'q'}
+                      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded transition-colors disabled:pointer-events-none ${openBoxButtonClass}`}
+                    >
+                      <Plus className={`h-5 w-5 ${isOpeningBox ? 'animate-pulse' : ''}`} />
+                    </button>
+                  )}
+                </div>
+                {openBoxError && (
+                  <p className="mt-2 text-xs font-medium text-red-700 dark:text-red-300">{openBoxError}</p>
+                )}
               </div>
 
               {/* Size Breakdown Table */}

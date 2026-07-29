@@ -1255,6 +1255,7 @@ async function openBoxStock(boxStockId, storeId = defaultStoreId) {
       `SELECT
          bs.id,
          bs.product_variant_id AS productVariantId,
+         p.id AS productId,
          bs.size_range AS sizeRange,
          bs.quantity,
          pv.price
@@ -1286,6 +1287,7 @@ async function openBoxStock(boxStockId, storeId = defaultStoreId) {
     await connection.commit();
     return {
       productVariantId: boxStock.productVariantId,
+      productId: boxStock.productId,
       remainingQuantity: Number(boxStock.quantity) - 1,
       inventory
     };
@@ -2140,6 +2142,28 @@ app.post("/api/products/prices", requireAuth, requireStoreOwner, requireStoreMan
     next(error);
   } finally {
     connection.release();
+  }
+});
+
+app.post("/api/box-stock/:id/open", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+  const boxStockId = Number(request.params.id);
+
+  if (!Number.isSafeInteger(boxStockId) || boxStockId <= 0) {
+    apiMessage(response, "Quti zaxirasi noto'g'ri tanlangan.", 400);
+    return;
+  }
+
+  try {
+    const storeId = currentStoreId(request);
+    const opened = await openBoxStock(boxStockId, storeId);
+    const product = await fetchProduct(opened.productId, storeId, opened.productVariantId);
+
+    apiData(response, {
+      opened,
+      product: product ? productForClient(request, product) : null
+    });
+  } catch (error) {
+    next(error);
   }
 });
 
