@@ -25,6 +25,7 @@ export interface BoxStockItem {
 }
 
 export interface ProductImage {
+  id?: number;
   name?: string;
   path?: string;
   type?: string;
@@ -32,6 +33,17 @@ export interface ProductImage {
   tempId?: string;
   uploading?: boolean;
   error?: string;
+}
+
+export interface StockAdditionItem {
+  id: number;
+  stockType: 'pair' | 'box';
+  size: number | null;
+  sizeRange: string;
+  quantity: number;
+  addedAt: string;
+  isCancelled: boolean;
+  addedBy?: string;
 }
 
 export interface Product {
@@ -47,6 +59,7 @@ export interface Product {
   landingPrice: number | null;
   inventory: InventoryItem[];
   boxStock?: BoxStockItem[];
+  stockAdditions?: StockAdditionItem[];
   box_quantity?: number;
   images: ProductImage[];
   createdAt?: string;
@@ -151,6 +164,15 @@ export interface CancelSoldProductResponse {
   restoredQuantity: number;
 }
 
+export interface CancelStockAdditionResponse {
+  addition: {
+    id: number;
+    isCancelled: boolean;
+    restoredQuantity: number;
+  };
+  product: Product | null;
+}
+
 export interface PriceUpdatePayload {
   artNo: string;
   landingPriceUpdate?: number;
@@ -231,6 +253,13 @@ class APIClient {
         id: Number(item.id),
         sizeRange: String(item.sizeRange || ''),
         quantity: Number(item.quantity || 0),
+      })),
+      stockAdditions: (product.stockAdditions || []).map((item) => ({
+        ...item,
+        id: Number(item.id),
+        size: item.size === null || item.size === undefined ? null : Number(item.size),
+        quantity: Number(item.quantity || 0),
+        isCancelled: Boolean(item.isCancelled),
       })),
       images: (product.images || []).map((image) => ({
         ...image,
@@ -375,6 +404,22 @@ class APIClient {
     return this.normalizeProduct(response.data || ({} as Product));
   }
 
+  async updatePairInventory(id: number, variantId: number | undefined, inventory: InventoryItem[]): Promise<Product> {
+    const response = await this.request<{ data: Product }>('PUT', `/products/${id}/pair-inventory`, {
+      variantId,
+      inventory,
+    });
+    return this.normalizeProduct(response.data || ({} as Product));
+  }
+
+  async updateBoxStock(id: number, variantId: number | undefined, boxes: BoxStockItem[]): Promise<Product> {
+    const response = await this.request<{ data: Product }>('PUT', `/products/${id}/box-stock`, {
+      variantId,
+      boxes,
+    });
+    return this.normalizeProduct(response.data || ({} as Product));
+  }
+
   async deleteProduct(id: number): Promise<any> {
     return this.request('DELETE', `/products/${id}`);
   }
@@ -421,6 +466,17 @@ class APIClient {
       `/sold-products/${encodeURIComponent(id)}/cancel`
     );
     return response.data;
+  }
+
+  async cancelStockAddition(id: number): Promise<CancelStockAdditionResponse> {
+    const response = await this.request<{ data: CancelStockAdditionResponse }>(
+      'POST',
+      `/stock-additions/${encodeURIComponent(id)}/cancel`
+    );
+    return {
+      ...response.data,
+      product: response.data?.product ? this.normalizeProduct(response.data.product) : null,
+    };
   }
   // New sold-product feature code ends.
 

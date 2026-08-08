@@ -14,6 +14,9 @@ export interface UseProductsReturn {
   fetchMetadata: () => Promise<void>;
   createProduct: (product: Product) => Promise<Product | null>;
   updateProduct: (id: number, product: Product) => Promise<Product | null>;
+  updatePairInventory: (id: number, variantId: number | undefined, inventory: Product['inventory']) => Promise<Product | null>;
+  updateBoxStock: (id: number, variantId: number | undefined, boxes: NonNullable<Product['boxStock']>) => Promise<Product | null>;
+  cancelStockAddition: (id: number) => Promise<Product | null>;
   updateProductPrices: (payload: PriceUpdatePayload) => Promise<boolean>;
   openBoxStock: (boxStockId: number) => Promise<Product | null>;
   deleteProduct: (id: number) => Promise<boolean>;
@@ -125,6 +128,69 @@ export function useProducts(): UseProductsReturn {
     [fetchProducts]
   );
 
+  const replaceProductInState = useCallback((updated: Product, fallbackId?: number) => {
+    const updatedKey = productRowKey(updated);
+    setProducts((prev) =>
+      prev.map((product) =>
+        productRowKey(product) === updatedKey || (!updated.variantId && fallbackId && product.id === fallbackId)
+          ? updated
+          : product
+      )
+    );
+  }, []);
+
+  const updatePairInventory = useCallback(
+    async (id: number, variantId: number | undefined, inventory: Product['inventory']): Promise<Product | null> => {
+      try {
+        const updated = await api.updatePairInventory(id, variantId, inventory);
+        replaceProductInState(updated, id);
+        return updated;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Juft inventarini yangilab bo\'lmadi';
+        setError(message);
+        console.error('[v0] Failed to update pair inventory:', message);
+        return null;
+      }
+    },
+    [replaceProductInState]
+  );
+
+  const updateBoxStock = useCallback(
+    async (id: number, variantId: number | undefined, boxes: NonNullable<Product['boxStock']>): Promise<Product | null> => {
+      try {
+        const updated = await api.updateBoxStock(id, variantId, boxes);
+        replaceProductInState(updated, id);
+        return updated;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Quti zaxirasini yangilab bo\'lmadi';
+        setError(message);
+        console.error('[v0] Failed to update box stock:', message);
+        return null;
+      }
+    },
+    [replaceProductInState]
+  );
+
+  const cancelStockAddition = useCallback(
+    async (id: number): Promise<Product | null> => {
+      try {
+        const result = await api.cancelStockAddition(id);
+        if (!result.product) {
+          await fetchProducts();
+          return null;
+        }
+        replaceProductInState(result.product);
+        return result.product;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Qo\'shilgan zaxirani bekor qilib bo\'lmadi';
+        setError(message);
+        console.error('[v0] Failed to cancel stock addition:', message);
+        return null;
+      }
+    },
+    [fetchProducts, replaceProductInState]
+  );
+
   const openBoxStock = useCallback(
     async (boxStockId: number): Promise<Product | null> => {
       try {
@@ -205,6 +271,9 @@ export function useProducts(): UseProductsReturn {
     fetchMetadata,
     createProduct,
     updateProduct,
+    updatePairInventory,
+    updateBoxStock,
+    cancelStockAddition,
     updateProductPrices,
     openBoxStock,
     deleteProduct,

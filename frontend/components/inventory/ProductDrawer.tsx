@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { Product } from '@/lib/api';
 import { X, ChevronLeft, ChevronRight, Pencil, Plus } from 'lucide-react';
-import { STOCK_STATUS, LOW_STOCK_THRESHOLD } from '@/lib/constants';
+import { getSeasonLabel, STOCK_STATUS, LOW_STOCK_THRESHOLD } from '@/lib/constants';
 
 interface ProductDrawerProps {
   product: Product | null;
@@ -14,6 +14,9 @@ interface ProductDrawerProps {
   canOpenBox?: boolean;
   isOpeningBox?: boolean;
   onEdit?: (product: Product) => void;
+  onEditPairInventory?: (product: Product) => void;
+  onEditBoxStock?: (product: Product) => void;
+  onCancelStockAddition?: (additionId: number) => Promise<void>;
   onOpenBox?: (boxStockId: number) => Promise<void>;
 }
 
@@ -37,6 +40,9 @@ export function ProductDrawer({
   canOpenBox = false,
   isOpeningBox = false,
   onEdit,
+  onEditPairInventory,
+  onEditBoxStock,
+  onCancelStockAddition,
   onOpenBox,
 }: ProductDrawerProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -64,6 +70,7 @@ export function ProductDrawer({
   const totalStock = getTotalStock(product.inventory);
   const sortedInventory = [...product.inventory].sort((a, b) => a.size - b.size);
   const boxStock = (product.boxStock || []).filter((item) => item.quantity > 0);
+  const stockAdditions = product.stockAdditions || [];
   const firstOpenableBox = boxStock[0] || null;
   const hasOpenableBox = Boolean(firstOpenableBox);
   const allSizesUnavailable = sortedInventory.length > 0 && sortedInventory.every((item) => item.quantity === 0);
@@ -305,7 +312,7 @@ export function ProductDrawer({
                   <div>
                     <p className="text-xs text-gray-600 dark:text-gray-400">Mavsumlar</p>
                     <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {product.seasons?.join(', ') || 'Yo\'q'}
+                      {product.seasons?.map(getSeasonLabel).join(', ') || 'Yo\'q'}
                     </p>
                   </div>
                 </div>
@@ -341,9 +348,31 @@ export function ProductDrawer({
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
                   Inventar
                 </h3>
-                <span className={`inline-block rounded px-2.5 py-0.5 text-xs font-medium ${stockInfo.color}`}>
-                  {stockInfo.label}
-                </span>
+                <div className="flex items-center gap-2">
+                  {canEditProduct && onEditPairInventory && (
+                    <button
+                      type="button"
+                      onClick={() => onEditPairInventory(product)}
+                      className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Juft
+                    </button>
+                  )}
+                  {canEditProduct && onEditBoxStock && (
+                    <button
+                      type="button"
+                      onClick={() => onEditBoxStock(product)}
+                      className="inline-flex items-center gap-1 rounded border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-xs font-medium text-sky-800 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200 dark:hover:bg-sky-900"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Quti
+                    </button>
+                  )}
+                  <span className={`inline-block rounded px-2.5 py-0.5 text-xs font-medium ${stockInfo.color}`}>
+                    {stockInfo.label}
+                  </span>
+                </div>
               </div>
 
               {/* Total Stock Summary */}
@@ -432,6 +461,55 @@ export function ProductDrawer({
                         <p className="mt-1 text-sm font-medium text-sky-900 dark:text-sky-100">{item.sizeRange}</p>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {stockAdditions.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
+                    Qo'shilgan zaxira
+                  </h4>
+                  <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+                    <table className="w-full text-sm">
+                      <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Tur</th>
+                          <th className="px-3 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Razmer</th>
+                          <th className="px-3 py-2 text-center font-semibold text-gray-900 dark:text-gray-100">Soni</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Amal</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stockAdditions.map((addition) => (
+                          <tr key={addition.id} className="border-b border-gray-200 dark:border-gray-800">
+                            <td className="px-3 py-2 text-gray-900 dark:text-gray-100">
+                              {addition.stockType === 'box' ? 'Quti' : 'Juft'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-900 dark:text-gray-100">
+                              {addition.stockType === 'box' ? addition.sizeRange : addition.size}
+                            </td>
+                            <td className="px-3 py-2 text-center text-gray-900 dark:text-gray-100">
+                              {addition.quantity}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {addition.isCancelled ? (
+                                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Bekor qilingan</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => onCancelStockAddition?.(addition.id)}
+                                  disabled={!onCancelStockAddition}
+                                  className="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-900"
+                                >
+                                  Bekor qilish
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}

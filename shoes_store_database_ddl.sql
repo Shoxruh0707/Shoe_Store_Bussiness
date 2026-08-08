@@ -294,6 +294,50 @@ CREATE TABLE box_stock (
 );
 
 -- =====================================================
+-- STOCK ADDITIONS
+-- =====================================================
+
+CREATE TABLE stock_additions (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+    store_id INT UNSIGNED NOT NULL,
+    user_id INT UNSIGNED NULL,
+    product_variant_id INT UNSIGNED NOT NULL,
+    stock_type ENUM('pair', 'box') NOT NULL,
+    size VARCHAR(20) NULL,
+    size_range VARCHAR(255) NULL,
+    quantity INT NOT NULL,
+    box_stock_id INT UNSIGNED NULL,
+    added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    isCancelled BOOLEAN NOT NULL DEFAULT FALSE,
+
+    INDEX idx_stock_additions_store_added (store_id, added_at),
+    INDEX idx_stock_additions_variant (product_variant_id),
+    INDEX idx_stock_additions_box_stock (box_stock_id),
+
+    CONSTRAINT fk_stock_additions_store
+        FOREIGN KEY (store_id)
+        REFERENCES store(id),
+
+    CONSTRAINT fk_stock_additions_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_stock_additions_variant
+        FOREIGN KEY (product_variant_id)
+        REFERENCES product_variant(id),
+
+    CONSTRAINT fk_stock_additions_box_stock
+        FOREIGN KEY (box_stock_id)
+        REFERENCES box_stock(id)
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_stock_additions_quantity
+        CHECK (quantity > 0)
+);
+
+-- =====================================================
 -- STORE USERS
 -- =====================================================
 

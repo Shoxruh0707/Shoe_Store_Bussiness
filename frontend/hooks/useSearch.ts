@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Product } from '@/lib/api';
+import { getSeasonLabel } from '@/lib/constants';
 
 function normalizeSearchValue(value: unknown): string {
   return String(value ?? '').trim().toLowerCase();
@@ -27,6 +28,7 @@ function searchableProductText(product: Product): string {
     product.material,
     product.type,
     ...(product.seasons || []),
+    ...(product.seasons || []).map(getSeasonLabel),
     ...existingSizes,
     ...boxStock,
   ]

@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { api, Product, Metadata, ProductLookup } from '@/lib/api';
 import { X, Plus, Minus, ChevronRight, ChevronLeft } from 'lucide-react';
-import { SHOE_SIZES } from '@/lib/constants';
+import { getSeasonLabel, SHOE_SIZES } from '@/lib/constants';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -224,6 +224,7 @@ export function AddProductModal({
   };
 
   const handleSubmit = async () => {
+    const isEditing = Boolean(editingProduct);
     if (!formData.artNo || !formData.type || !formData.colour || !formData.material) {
       setSubmitError('Iltimos, barcha majburiy maydonlarni to\'ldiring.');
       return;
@@ -232,11 +233,11 @@ export function AddProductModal({
       setSubmitError('Kamida bitta mavsum tanlang.');
       return;
     }
-    if (!hasPositiveNumber(formData.price)) {
+    if (!isEditing && !hasPositiveNumber(formData.price)) {
       setSubmitError('Sotish narxini kiriting.');
       return;
     }
-    if (!hasPositiveNumber(formData.landingPrice)) {
+    if (!isEditing && !hasPositiveNumber(formData.landingPrice)) {
       setSubmitError('Kelish narxini kiriting.');
       return;
     }
@@ -289,6 +290,7 @@ export function AddProductModal({
         variant.material.toLowerCase() === normalizedMaterial
     ) || null;
   const visibleSteps = STEPS.filter((step) => {
+    if (editingProduct && ['pricing', 'inventory'].includes(step.id)) return false;
     if (hasExistingArt && step.id === 'pricing') return false;
     if (exactVariant && step.id === 'images') return false;
     return true;
@@ -524,7 +526,7 @@ export function AddProductModal({
                               : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
                           }`}
                         >
-                          {season}
+                          {getSeasonLabel(season)}
                         </button>
                       ))}
                     </div>
@@ -810,7 +812,7 @@ export function AddProductModal({
                   disabled={isSubmitting || hasUploadingImages || hasFailedImages}
                   className="flex-1 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 dark:bg-green-600 dark:hover:bg-green-700"
                 >
-                  {isSubmitting ? 'Saqlanmoqda...' : hasUploadingImages ? 'Rasmlar yuklanmoqda...' : 'Mahsulotni saqlash'}
+                  {isSubmitting ? 'Saqlanmoqda...' : hasUploadingImages ? 'Rasmlar yuklanmoqda...' : editingProduct ? 'O\'zgarishlarni qo\'llash' : 'Mahsulotni saqlash'}
                 </button>
               )}
             </div>

@@ -8,6 +8,7 @@ import { useSearch } from '@/hooks/useSearch';
 import { ProductTable } from '@/components/inventory/ProductTable';
 import { ProductDrawer } from '@/components/inventory/ProductDrawer';
 import { AddProductModal } from '@/components/inventory/AddProductModal';
+import { InventoryEditModal } from '@/components/inventory/InventoryEditModal';
 import { SoldProductModal } from '@/components/inventory/SoldProductModal';
 import { PriceUpdateModal } from '@/components/inventory/PriceUpdateModal';
 import { SoldProductPayload } from '@/lib/api';
@@ -21,6 +22,9 @@ export default function InventoryPage() {
     error,
     createProduct,
     updateProduct,
+    updatePairInventory,
+    updateBoxStock,
+    cancelStockAddition,
     updateProductPrices,
     openBoxStock,
     markProductSold,
@@ -33,6 +37,9 @@ export default function InventoryPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSoldModalOpen, setIsSoldModalOpen] = useState(false);
   const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
+  const [isInventoryModalOpen, setIsInventoryModalOpen] = useState(false);
+  const [inventoryEditMode, setInventoryEditMode] = useState<'pair' | 'box'>('pair');
+  const [inventoryEditProduct, setInventoryEditProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saleMessage, setSaleMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -105,6 +112,66 @@ export default function InventoryPage() {
       const message = error instanceof Error ? error.message : 'Qutini ochib bo\'lmadi.';
       setSaleMessage({ type: 'error', text: message });
       throw error;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSavePairInventory = async (inventory: Product['inventory']) => {
+    if (!inventoryEditProduct?.id) return null;
+
+    setIsSubmitting(true);
+    setSaleMessage(null);
+    try {
+      const updatedProduct = await updatePairInventory(
+        inventoryEditProduct.id,
+        inventoryEditProduct.variantId,
+        inventory
+      );
+      if (updatedProduct) {
+        setSelectedProduct(updatedProduct);
+        setInventoryEditProduct(updatedProduct);
+        setSaleMessage({ type: 'success', text: 'Juft inventari yangilandi.' });
+      }
+      return updatedProduct;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSaveBoxStock = async (boxes: NonNullable<Product['boxStock']>) => {
+    if (!inventoryEditProduct?.id) return null;
+
+    setIsSubmitting(true);
+    setSaleMessage(null);
+    try {
+      const updatedProduct = await updateBoxStock(
+        inventoryEditProduct.id,
+        inventoryEditProduct.variantId,
+        boxes
+      );
+      if (updatedProduct) {
+        setSelectedProduct(updatedProduct);
+        setInventoryEditProduct(updatedProduct);
+        setSaleMessage({ type: 'success', text: 'Quti zaxirasi yangilandi.' });
+      }
+      return updatedProduct;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCancelStockAddition = async (additionId: number) => {
+    if (!window.confirm('Bu qo\'shilgan zaxira bekor qilinsinmi?')) return;
+
+    setIsSubmitting(true);
+    setSaleMessage(null);
+    try {
+      const updatedProduct = await cancelStockAddition(additionId);
+      if (updatedProduct) {
+        setSelectedProduct(updatedProduct);
+        setSaleMessage({ type: 'success', text: 'Qo\'shilgan zaxira bekor qilindi.' });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -251,12 +318,36 @@ export default function InventoryPage() {
         canOpenBox={canManageInventory}
         isOpeningBox={isSubmitting}
         onOpenBox={handleOpenBoxStock}
+        onEditPairInventory={(product) => {
+          setInventoryEditMode('pair');
+          setInventoryEditProduct(product);
+          setIsInventoryModalOpen(true);
+        }}
+        onEditBoxStock={(product) => {
+          setInventoryEditMode('box');
+          setInventoryEditProduct(product);
+          setIsInventoryModalOpen(true);
+        }}
+        onCancelStockAddition={handleCancelStockAddition}
         onEdit={(product) => {
           setSelectedProduct(null);
           setIsDrawerOpen(false);
           setEditingProduct(product);
           setIsAddModalOpen(true);
         }}
+      />
+
+      <InventoryEditModal
+        isOpen={isInventoryModalOpen}
+        mode={inventoryEditMode}
+        product={inventoryEditProduct}
+        onClose={() => {
+          setIsInventoryModalOpen(false);
+          setInventoryEditProduct(null);
+        }}
+        onSavePair={handleSavePairInventory}
+        onSaveBoxes={handleSaveBoxStock}
+        isSubmitting={isSubmitting}
       />
 
       {/* Add/Edit Modal */}
