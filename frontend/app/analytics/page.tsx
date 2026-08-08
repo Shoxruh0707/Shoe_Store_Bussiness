@@ -50,8 +50,9 @@ export default function AnalyticsPage() {
           quantity: summary.quantity + item.quantity,
           revenue: summary.revenue + item.soldPrice * item.quantity,
           landing: summary.landing + Number(item.landingPrice || 0) * item.quantity,
+          profit: summary.profit + (item.soldPrice - Number(item.landingPrice || 0)) * item.quantity,
         }),
-        { quantity: 0, revenue: 0, landing: 0 }
+        { quantity: 0, revenue: 0, landing: 0, profit: 0 }
       ),
     [filteredItems]
   );
@@ -145,7 +146,7 @@ export default function AnalyticsPage() {
         )}
 
         {canViewLandingPrice && (
-          <div className="mb-6 grid gap-3 sm:grid-cols-3">
+          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
               <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Sotilgan soni</p>
               <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{totals.quantity}</p>
@@ -157,6 +158,10 @@ export default function AnalyticsPage() {
             <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
               <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Kelish narxi jami</p>
               <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{money(totals.landing)}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Foyda</p>
+              <p className="mt-1 text-2xl font-bold text-blue-700 dark:text-blue-300">{money(totals.profit)}</p>
             </div>
           </div>
         )}
@@ -217,6 +222,7 @@ export default function AnalyticsPage() {
                     {canViewLandingPrice && (
                       <>
                         <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Kelish narxi</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Foyda</th>
                         <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sotuvchi</th>
                         <th className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">Amal</th>
                       </>
@@ -249,6 +255,9 @@ export default function AnalyticsPage() {
                       {canViewLandingPrice && (
                         <>
                           <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{money(item.landingPrice || 0)}</td>
+                          <td className="px-4 py-3 font-semibold text-blue-700 dark:text-blue-300">
+                            {money((item.soldPrice - Number(item.landingPrice || 0)) * item.quantity)}
+                          </td>
                           <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.soldBy || 'Yo\'q'}</td>
                           <td className="px-4 py-3 text-right">
                             {item.isCancelled ? (
