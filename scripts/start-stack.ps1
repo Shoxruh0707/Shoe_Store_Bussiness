@@ -16,6 +16,8 @@ function Stop-ProjectProcess {
       ($_.Name -eq "node.exe" -and (
         $_.CommandLine -like "*server.js*" -or
         $_.CommandLine -like "*src/telegramBot.js*" -or
+        $_.CommandLine -like "*src/telegramChannelBot.js*" -or
+        $_.CommandLine -like "*run channel-bot*" -or
         $_.CommandLine -like "*--prefix*frontend*run dev*" -or
         $_.CommandLine -like "*next*dev -p 3001*" -or
         $_.CommandLine -like "*next*start-server.js*" -or
@@ -53,6 +55,7 @@ if ($Restart) {
 Start-LoggedProcess -Name "backend" -FilePath "node" -ArgumentList @("server.js")
 Start-LoggedProcess -Name "frontend" -FilePath "npm.cmd" -ArgumentList @("--prefix", "frontend", "run", "dev")
 Start-LoggedProcess -Name "bot" -FilePath "npm.cmd" -ArgumentList @("run", "bot")
+Start-LoggedProcess -Name "channel-bot" -FilePath "npm.cmd" -ArgumentList @("run", "channel-bot")
 Start-LoggedProcess -Name "ngrok" -FilePath $Ngrok -ArgumentList @("http", "3001", "--log=stdout")
 
 Write-Host "Started stack. Logs are in $Logs"

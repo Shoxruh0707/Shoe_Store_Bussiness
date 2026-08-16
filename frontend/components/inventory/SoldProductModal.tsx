@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Package, Search, X, XCircle } from 'lucide-react';
 import { Metadata, Product, SoldProductPayload } from '@/lib/api';
 import { SHOE_SIZES } from '@/lib/constants';
+import { ThousandsPriceInput, priceToThousandsInput } from './ThousandsPriceInput';
 
 type SaleMode = 'pair' | 'box';
 
@@ -80,9 +81,10 @@ function availableSizesForProduct(product: Product | null) {
     .sort((left, right) => left.size - right.size);
 }
 
-function formatMoneyInput(value: number) {
-  if (!Number.isFinite(value)) return '';
-  return value.toFixed(2);
+function formatBoxPriceInput(pairPrice: string, pairCount: number) {
+  const number = Number(pairPrice);
+  if (!Number.isFinite(number) || pairCount <= 0) return '';
+  return String(number * pairCount);
 }
 
 // New sold-product feature code starts.
@@ -179,7 +181,7 @@ export function SoldProductModal({
       const pairCount = nextBox ? pairCountFromBoxRange(nextBox.sizeRange) : selectedBoxPairCount;
 
       if ((field === 'pairPrice' || field === 'boxStockId') && Number.isFinite(pairPrice) && pairPrice >= 0 && pairCount > 0) {
-        next.boxPrice = formatMoneyInput(pairPrice * pairCount);
+        next.boxPrice = formatBoxPriceInput(String(pairPrice), pairCount);
       }
 
       return next;
@@ -194,7 +196,7 @@ export function SoldProductModal({
   const selectProduct = (product: Product) => {
     const firstAvailableSize = availableSizesForProduct(product)[0];
     const firstBox = (product.boxStock || []).find((item) => item.quantity > 0);
-    const pairPrice = String(product.price || '');
+    const pairPrice = priceToThousandsInput(product.price);
     const pairCount = firstBox ? pairCountFromBoxRange(firstBox.sizeRange) : 0;
 
     setSelectedVariantId(product.variantId || null);
@@ -207,7 +209,7 @@ export function SoldProductModal({
       size: firstAvailableSize ? String(firstAvailableSize.size) : current.size,
       soldPrice: current.soldPrice || pairPrice,
       pairPrice: current.pairPrice || pairPrice,
-      boxPrice: current.boxPrice || formatMoneyInput(Number(pairPrice) * pairCount),
+      boxPrice: current.boxPrice || formatBoxPriceInput(pairPrice, pairCount),
       boxStockId: firstBox ? String(firstBox.id) : '',
     }));
     setError(null);
@@ -221,14 +223,14 @@ export function SoldProductModal({
 
       const firstSize = availableSizesForProduct(selectedProduct)[0];
       const firstBox = (selectedProduct.boxStock || []).find((item) => item.quantity > 0);
-      const pairPrice = current.pairPrice || current.soldPrice || String(selectedProduct.price || '');
+      const pairPrice = current.pairPrice || current.soldPrice || priceToThousandsInput(selectedProduct.price);
       const pairCount = firstBox ? pairCountFromBoxRange(firstBox.sizeRange) : 0;
 
       return {
         ...current,
         size: mode === 'pair' && firstSize ? String(firstSize.size) : current.size,
         pairPrice,
-        boxPrice: mode === 'box' ? current.boxPrice || formatMoneyInput(Number(pairPrice) * pairCount) : current.boxPrice,
+        boxPrice: mode === 'box' ? current.boxPrice || formatBoxPriceInput(pairPrice, pairCount) : current.boxPrice,
         boxStockId: mode === 'box' && firstBox ? String(firstBox.id) : current.boxStockId,
       };
     });
@@ -251,6 +253,7 @@ export function SoldProductModal({
       size: formData.size,
       sold_price: soldPrice,
       quantity,
+      price_unit: 'thousands',
     };
 
     try {
@@ -285,6 +288,7 @@ export function SoldProductModal({
       quantity,
       pair_price: pairPrice,
       box_price: boxPrice,
+      price_unit: 'thousands',
       box_stock_id: selectedBox?.id,
     });
     resetAndClose();
@@ -554,14 +558,10 @@ export function SoldProductModal({
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
                       Sotilgan narx <span className="text-red-600">*</span>
                     </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                    <ThousandsPriceInput
                       value={formData.soldPrice}
-                      onChange={(event) => updateField('soldPrice', event.target.value)}
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                      placeholder="0.00"
+                      onChange={(value) => updateField('soldPrice', value)}
+                      required
                     />
                   </div>
                 </div>
@@ -611,14 +611,10 @@ export function SoldProductModal({
                       <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
                         Bir juft narxi <span className="text-red-600">*</span>
                       </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
+                      <ThousandsPriceInput
                         value={formData.pairPrice}
-                        onChange={(event) => updateField('pairPrice', event.target.value)}
-                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                        placeholder="0.00"
+                        onChange={(value) => updateField('pairPrice', value)}
+                        required
                       />
                     </div>
 
@@ -626,14 +622,10 @@ export function SoldProductModal({
                       <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
                         Butun quti narxi <span className="text-red-600">*</span>
                       </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
+                      <ThousandsPriceInput
                         value={formData.boxPrice}
-                        onChange={(event) => updateField('boxPrice', event.target.value)}
-                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                        placeholder="0.00"
+                        onChange={(value) => updateField('boxPrice', value)}
+                        required
                       />
                     </div>
                   </div>

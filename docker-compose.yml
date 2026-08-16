@@ -48,6 +48,8 @@ services:
       API_AUTH_REQUIRED: ${API_AUTH_REQUIRED:-true}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      TELEGRAM_CHANNEL_BOT_TOKEN: ${TELEGRAM_CHANNEL_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}}
+      TELEGRAM_PUBLIC_ASSET_BASE_URL: ${TELEGRAM_PUBLIC_ASSET_BASE_URL:-https://${DOMAIN:?Set DOMAIN in .env}}
       TELEGRAM_AUTH_MAX_AGE_SECONDS: ${TELEGRAM_AUTH_MAX_AGE_SECONDS:-86400}
       FRONTEND_URL: ${PUBLIC_URL:-https://${DOMAIN:?Set DOMAIN in .env}}
       PUBLIC_URL: ${PUBLIC_URL:-https://${DOMAIN:?Set DOMAIN in .env}}
@@ -124,6 +126,31 @@ services:
       mysql:
         condition: service_healthy
       backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+    networks:
+      - private
+
+  channel-bot:
+    build:
+      context: .
+      target: bot
+    command: ["npm", "run", "channel-bot"]
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:?Set DB_USER in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DB_NAME: ${DB_NAME:-shoes_store_db}
+      TELEGRAM_CHANNEL_BOT_TOKEN: ${TELEGRAM_CHANNEL_BOT_TOKEN:?Set TELEGRAM_CHANNEL_BOT_TOKEN in .env}
+      TELEGRAM_CHANNEL_POLL_TIMEOUT_SECONDS: ${TELEGRAM_CHANNEL_POLL_TIMEOUT_SECONDS:-25}
+    depends_on:
+      mysql:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true

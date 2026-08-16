@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { api, PriceUpdatePayload } from '@/lib/api';
+import { ThousandsPriceInput } from './ThousandsPriceInput';
 
 interface PriceUpdateModalProps {
   isOpen: boolean;
@@ -114,6 +115,7 @@ export function PriceUpdateModal({
 
     const saved = await onSubmit({
       artNo: normalizedArtNo,
+      price_unit: 'thousands',
       ...(nextLandingPrice !== undefined ? { landingPriceUpdate: nextLandingPrice } : {}),
       ...(nextSellingPrice !== undefined ? { sellingPrice: nextSellingPrice } : {}),
     });
@@ -180,14 +182,14 @@ export function PriceUpdateModal({
                   Kelish narxini yangilash
                 </label>
                 <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  inputMode="decimal"
+                  type="hidden"
                   value={landingPriceUpdate}
-                  onChange={(event) => setLandingPriceUpdate(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                  placeholder="Bo'sh qolsa o'zgarmaydi"
+                  readOnly
+                />
+                <ThousandsPriceInput
+                  value={landingPriceUpdate}
+                  onChange={setLandingPriceUpdate}
+                  placeholder="Bo'sh"
                 />
               </div>
 
@@ -196,14 +198,14 @@ export function PriceUpdateModal({
                   Sotish narxi
                 </label>
                 <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  inputMode="decimal"
+                  type="hidden"
                   value={sellingPrice}
-                  onChange={(event) => setSellingPrice(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                  placeholder="Bo'sh qolsa o'zgarmaydi"
+                  readOnly
+                />
+                <ThousandsPriceInput
+                  value={sellingPrice}
+                  onChange={setSellingPrice}
+                  placeholder="Bo'sh"
                 />
               </div>
             </div>

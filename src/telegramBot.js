@@ -1,6 +1,10 @@
 require("dotenv").config();
 
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 const { pool, testConnection } = require("./db");
+const { ensureStoreTelegramColumns } = require("./storeTelegramColumns");
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const webAppUrl = process.env.TELEGRAM_WEBAPP_URL;
@@ -10,6 +14,7 @@ const defaultPasswordHash =
 const sessions = new Map();
 const backButtonText = "Ortga";
 const backCallbackData = "back";
+const uploadDir = path.join(__dirname, "..", "public", "uploads");
 
 if (!token) {
   throw new Error("TELEGRAM_BOT_TOKEN is required.");
@@ -27,6 +32,24 @@ function cleanText(value) {
 function normalizePhone(value) {
   const phone = cleanText(value).replace(/\s+/g, "");
   return /^\+?[0-9-]{7,20}$/.test(phone) ? phone : "";
+}
+
+function normalizeTelegramChannelLink(value) {
+  const text = cleanText(value);
+  if (!text) return "";
+  if (/^@[A-Za-z0-9_]+$/.test(text)) return text;
+  if (/^https:\/\/t\.me\/[A-Za-z0-9_]+$/i.test(text)) return text;
+  if (/^https:\/\/telegram\.me\/[A-Za-z0-9_]+$/i.test(text)) return text.replace(/^https:\/\/telegram\.me\//i, "https://t.me/");
+  return "";
+}
+
+function channelNameFromLink(value) {
+  const link = normalizeTelegramChannelLink(value);
+  if (!link) return "";
+  if (link.startsWith("@")) return link;
+
+  const match = link.match(/^https:\/\/t\.me\/([A-Za-z0-9_]+)$/i);
+  return match ? `@${match[1]}` : "";
 }
 
 function profileFromTelegram(from) {
@@ -113,6 +136,7 @@ function sellerRequestKeyboard(requestId) {
 function ownerHomeKeyboard() {
   return webAppKeyboard([
     [{ text: "Foydalanuvchilar ro'yxati", callback_data: "users:list" }],
+    [{ text: "Do'kon ma'lumotlari", callback_data: "store_settings" }],
     [{ text: "Profil", callback_data: "profile" }]
   ]);
 }
@@ -130,6 +154,10 @@ function userDeleteConfirmKeyboard(userId) {
 
 function profileKeyboard(user) {
   const rows = [];
+
+  if (["owner", "manager"].includes(user?.storeRole)) {
+    rows.push([{ text: "Do'kon ma'lumotlari", callback_data: "store_settings" }]);
+  }
 
   if (user?.storeRole === "owner") {
     rows.push([{ text: "Inventarni o'chirish", callback_data: "inventory_delete:confirm" }]);
@@ -166,12 +194,48 @@ function sellerLeaveConfirmKeyboard() {
   };
 }
 
+function storeSettingsKeyboard() {
+  return {
+    inline_keyboard: withBackButton([
+      [{ text: "Do'kon nomini o'zgartirish", callback_data: "store_edit:name" }],
+      [{ text: "Kanal nomini o'zgartirish", callback_data: "store_edit:channel_name" }],
+      [{ text: "Kanal linkini o'zgartirish", callback_data: "store_edit:channel_link" }],
+      [{ text: "Do'kon rasmini o'zgartirish", callback_data: "store_edit:image" }]
+    ], "profile")
+  };
+}
+
 async function sendMessage(chatId, text, replyMarkup) {
   return telegram("sendMessage", {
     chat_id: chatId,
     text,
     reply_markup: replyMarkup
   });
+}
+
+async function saveTelegramPhoto(fileId) {
+  const file = await telegram("getFile", { file_id: fileId });
+  const filePath = cleanText(file.file_path);
+  const extension = path.extname(filePath).toLowerCase() || ".jpg";
+  const allowedExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
+  if (!allowedExtensions.has(extension)) {
+    throw new Error("Faqat JPG, PNG, WEBP yoki GIF rasm yuboring.");
+  }
+
+  const response = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  if (!response.ok) {
+    throw new Error("Telegramdan rasmni yuklab bo'lmadi.");
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (!buffer.length || buffer.length > 5 * 1024 * 1024) {
+    throw new Error("Rasm 5 MB yoki undan kichik bo'lishi kerak.");
+  }
+
+  await fs.promises.mkdir(uploadDir, { recursive: true });
+  const fileName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
+  await fs.promises.writeFile(path.join(uploadDir, fileName), buffer);
+  return `/uploads/${fileName}`;
 }
 
 async function ensureSellerStoreRequestsTable() {
@@ -274,6 +338,31 @@ async function ownerStoreForTelegramId(telegramId) {
   return stores[0] || null;
 }
 
+async function managerStoreForTelegramId(telegramId) {
+  const [stores] = await pool.execute(
+    `SELECT
+       s.id,
+       s.store_name AS storeName,
+       s.store_image AS storeImage,
+       s.channel_name_telegram AS channelNameTelegram,
+       s.channel_link_telegram AS channelLinkTelegram,
+       s.channel_id AS channelId,
+       u.id AS userId,
+       su.role AS storeRole
+     FROM users u
+     INNER JOIN store_users su ON su.user_id = u.id
+     INNER JOIN store s ON s.id = su.store_id
+     WHERE u.telegram_id = ?
+       AND su.role IN ('owner', 'manager')
+       AND s.is_active = TRUE
+     ORDER BY FIELD(su.role, 'owner', 'manager'), s.id
+     LIMIT 1`,
+    [telegramId]
+  );
+
+  return stores[0] || null;
+}
+
 function storeRoleLabel(role) {
   if (role === "owner") return "Egasi";
   if (role === "manager") return "Menejer";
@@ -351,6 +440,115 @@ async function showStoreUsers(chatId, from) {
       inline_keyboard: withBackButton(managementRows, "back:home")
     }
   );
+}
+
+async function showStoreSettings(chatId, from) {
+  const store = await managerStoreForTelegramId(from.id);
+  if (!store) {
+    await sendMessage(chatId, "Bu amal faqat do'kon egasi yoki menejeri uchun mavjud. /start ni yuboring.");
+    return;
+  }
+
+  await sendMessage(
+    chatId,
+    [
+      "Do'kon ma'lumotlari",
+      "",
+      `Nomi: ${store.storeName}`,
+      `Kanal nomi: ${store.channelNameTelegram || "Kiritilmagan"}`,
+      `Kanal linki: ${store.channelLinkTelegram || "Kiritilmagan"}`,
+      `Kanal ID: ${store.channelId || "Bot kanalga qo'shilmagan"}`,
+      `Rasm: ${store.storeImage ? "Saqlangan" : "Kiritilmagan"}`
+    ].join("\n"),
+    storeSettingsKeyboard()
+  );
+}
+
+async function beginStoreEdit(chatId, from, field) {
+  const store = await managerStoreForTelegramId(from.id);
+  if (!store) {
+    await sendMessage(chatId, "Bu amal faqat do'kon egasi yoki menejeri uchun mavjud. /start ni yuboring.");
+    return;
+  }
+
+  const stepByField = {
+    name: "edit_store_name",
+    channel_name: "edit_store_channel_name",
+    channel_link: "edit_store_channel_link",
+    image: "edit_store_image"
+  };
+  const step = stepByField[field];
+  if (!step) {
+    await sendMessage(chatId, "Do'kon ma'lumotini o'zgartirish amali noto'g'ri.");
+    return;
+  }
+
+  sessions.set(chatId, {
+    step,
+    profile: profileFromTelegram(from),
+    storeId: store.id,
+    data: {}
+  });
+
+  await promptForSessionStep(chatId, sessions.get(chatId));
+}
+
+async function updateStoreTextField(chatId, from, session, value) {
+  const text = cleanText(value);
+
+  if (session.step === "edit_store_name") {
+    if (!text || text.length > 50) {
+      await sendMessage(chatId, "Do'kon nomi 1-50 ta belgi bo'lishi kerak.");
+      return;
+    }
+
+    await pool.execute("UPDATE store SET store_name = ? WHERE id = ?", [text, session.storeId]);
+  } else if (session.step === "edit_store_channel_name") {
+    if (!text || text.length > 100) {
+      await sendMessage(chatId, "Kanal nomi 1-100 ta belgi bo'lishi kerak.");
+      return;
+    }
+
+    await pool.execute("UPDATE store SET channel_name_telegram = ? WHERE id = ?", [text, session.storeId]);
+  } else if (session.step === "edit_store_channel_link") {
+    const link = normalizeTelegramChannelLink(text);
+    if (!link || link.length > 255) {
+      await sendMessage(chatId, "Public kanal linkini @kanal yoki https://t.me/kanal formatida yuboring.");
+      return;
+    }
+
+    await pool.execute(
+      `UPDATE store
+       SET channel_id = CASE
+             WHEN COALESCE(channel_link_telegram, '') <> ? THEN NULL
+             ELSE channel_id
+           END,
+           channel_link_telegram = ?,
+           channel_name_telegram = COALESCE(NULLIF(channel_name_telegram, ''), ?)
+       WHERE id = ?`,
+      [link, link, channelNameFromLink(link) || null, session.storeId]
+    );
+  } else {
+    return;
+  }
+
+  sessions.delete(chatId);
+  await sendMessage(chatId, "Do'kon ma'lumoti yangilandi.");
+  await showStoreSettings(chatId, from);
+}
+
+async function updateStoreImage(chatId, from, session, photos) {
+  const photo = [...(photos || [])].sort((left, right) => Number(right.file_size || 0) - Number(left.file_size || 0))[0];
+  if (!photo?.file_id) {
+    await sendMessage(chatId, "Iltimos, do'kon uchun rasm yuboring.");
+    return;
+  }
+
+  const imagePath = await saveTelegramPhoto(photo.file_id);
+  await pool.execute("UPDATE store SET store_image = ? WHERE id = ?", [imagePath, session.storeId]);
+  sessions.delete(chatId);
+  await sendMessage(chatId, "Do'kon rasmi yangilandi.");
+  await showStoreSettings(chatId, from);
 }
 
 async function confirmDeleteStoreUser(chatId, from, userId) {
@@ -755,11 +953,25 @@ async function createTelegramUser(profile, data) {
 
         if (!storeId) {
           const [storeInsert] = await connection.execute(
-            `INSERT INTO store (store_name, is_active, channel_name_telegram)
-             VALUES (?, TRUE, ?)`,
-            [data.storeName, profile.telegramUsername || null]
+            `INSERT INTO store (store_name, is_active, channel_name_telegram, channel_link_telegram)
+             VALUES (?, TRUE, ?, ?)`,
+            [data.storeName, channelNameFromLink(data.channelLinkTelegram) || null, data.channelLinkTelegram || null]
           );
           storeId = storeInsert.insertId;
+        } else {
+          await connection.execute(
+            `UPDATE store
+             SET store_name = ?,
+                 channel_name_telegram = COALESCE(NULLIF(channel_name_telegram, ''), ?),
+                 channel_link_telegram = ?
+             WHERE id = ?`,
+            [
+              data.storeName,
+              channelNameFromLink(data.channelLinkTelegram) || null,
+              data.channelLinkTelegram || null,
+              storeId
+            ]
+          );
         }
 
         await connection.execute(
@@ -796,9 +1008,9 @@ async function createTelegramUser(profile, data) {
     let storeId = null;
     if (data.storeRole === "owner") {
       const [storeInsert] = await connection.execute(
-        `INSERT INTO store (store_name, is_active, channel_name_telegram)
-         VALUES (?, TRUE, ?)`,
-        [data.storeName, profile.telegramUsername || null]
+        `INSERT INTO store (store_name, is_active, channel_name_telegram, channel_link_telegram)
+         VALUES (?, TRUE, ?, ?)`,
+        [data.storeName, channelNameFromLink(data.channelLinkTelegram) || null, data.channelLinkTelegram || null]
       );
       storeId = storeInsert.insertId;
 
@@ -936,6 +1148,11 @@ async function promptForSessionStep(chatId, session) {
     return;
   }
 
+  if (session.step === "owner_channel_link") {
+    await sendMessage(chatId, "Iltimos, public Telegram kanal yoki guruh linkini yuboring. Masalan: @kanal yoki https://t.me/kanal", backReplyKeyboard());
+    return;
+  }
+
   if (session.step === "seller_store_name") {
     await sendMessage(chatId, "Qaysi do'konda sotasiz? Iltimos, do'konning aniq nomini yuboring.", backReplyKeyboard());
     return;
@@ -943,6 +1160,26 @@ async function promptForSessionStep(chatId, session) {
 
   if (session.step === "existing_seller_store_name") {
     await sendMessage(chatId, "Iltimos, do'konning aniq nomini yuboring.", backReplyKeyboard());
+    return;
+  }
+
+  if (session.step === "edit_store_name") {
+    await sendMessage(chatId, "Yangi do'kon nomini yuboring.", backReplyKeyboard());
+    return;
+  }
+
+  if (session.step === "edit_store_channel_name") {
+    await sendMessage(chatId, "Yangi Telegram kanal nomini yuboring.", backReplyKeyboard());
+    return;
+  }
+
+  if (session.step === "edit_store_channel_link") {
+    await sendMessage(chatId, "Yangi public Telegram kanal linkini yuboring. Masalan: @kanal yoki https://t.me/kanal", backReplyKeyboard());
+    return;
+  }
+
+  if (session.step === "edit_store_image") {
+    await sendMessage(chatId, "Yangi do'kon rasmini rasm sifatida yuboring.", backReplyKeyboard());
     return;
   }
 
@@ -990,6 +1227,13 @@ async function handleBack(chatId, from) {
     delete session.data.userRole;
     delete session.data.storeRole;
     session.step = "account_type";
+  } else if (session.step === "owner_channel_link") {
+    delete session.data.storeName;
+    session.step = "owner_store_name";
+  } else if (session.step.startsWith("edit_store_")) {
+    sessions.delete(chatId);
+    await showStoreSettings(chatId, from);
+    return;
   }
 
   sessions.set(chatId, session);
@@ -1199,7 +1443,43 @@ async function handleRegistrationText(chatId, from, text) {
     return true;
   }
 
-  if (session.step === "owner_store_name" || session.step === "seller_store_name") {
+  if (session.step === "edit_store_name" || session.step === "edit_store_channel_name" || session.step === "edit_store_channel_link") {
+    await updateStoreTextField(chatId, from, session, text);
+    return true;
+  }
+
+  if (session.step === "edit_store_image") {
+    await sendMessage(chatId, "Iltimos, rasmni fayl emas, Telegram rasm/photo sifatida yuboring.", backReplyKeyboard());
+    return true;
+  }
+
+  if (session.step === "owner_store_name") {
+    const storeName = cleanText(text);
+    if (!storeName || storeName.length > 50) {
+      await sendMessage(chatId, "Do'kon nomi 1-50 ta belgi bo'lishi kerak.");
+      return true;
+    }
+    session.data.storeName = storeName;
+    session.step = "owner_channel_link";
+    sessions.set(chatId, session);
+    await promptForSessionStep(chatId, session);
+    return true;
+  }
+
+  if (session.step === "owner_channel_link") {
+    const channelLink = normalizeTelegramChannelLink(text);
+    if (!channelLink || channelLink.length > 255) {
+      await sendMessage(chatId, "Public kanal linkini @kanal yoki https://t.me/kanal formatida yuboring.");
+      return true;
+    }
+
+    session.data.channelLinkTelegram = channelLink;
+    sessions.set(chatId, session);
+    await finishRegistration(chatId, session);
+    return true;
+  }
+
+  if (session.step === "seller_store_name") {
     const storeName = cleanText(text);
     if (!storeName || storeName.length > 50) {
       await sendMessage(chatId, "Do'kon nomi 1-50 ta belgi bo'lishi kerak.");
@@ -1255,6 +1535,16 @@ async function handleCallback(callbackQuery) {
 
   if (data === "profile") {
     await showProfile(chatId, callbackQuery.from);
+    return;
+  }
+
+  if (data === "store_settings") {
+    await showStoreSettings(chatId, callbackQuery.from);
+    return;
+  }
+
+  if (data.startsWith("store_edit:")) {
+    await beginStoreEdit(chatId, callbackQuery.from, data.slice("store_edit:".length));
     return;
   }
 
@@ -1391,6 +1681,14 @@ async function handleUpdate(update) {
     return;
   }
 
+  if (message.photo) {
+    const session = sessions.get(chatId);
+    if (session?.step === "edit_store_image") {
+      await updateStoreImage(chatId, message.from, session, message.photo);
+      return;
+    }
+  }
+
   if (message.text && (await handleRegistrationText(chatId, message.from, message.text))) {
     return;
   }
@@ -1400,6 +1698,7 @@ async function handleUpdate(update) {
 
 async function startBot() {
   await testConnection();
+  await ensureStoreTelegramColumns(pool);
   await ensureSellerStoreRequestsTable();
   let offset = 0;
   console.log("Telegram inventory bot is running.");

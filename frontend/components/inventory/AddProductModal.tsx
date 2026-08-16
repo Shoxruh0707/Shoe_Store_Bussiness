@@ -4,6 +4,11 @@ import { useState, useCallback, useEffect } from 'react';
 import { api, Product, Metadata, ProductLookup } from '@/lib/api';
 import { X, Plus, Minus, ChevronRight, ChevronLeft } from 'lucide-react';
 import { getSeasonLabel, SHOE_SIZES } from '@/lib/constants';
+import {
+  ThousandsPriceInput,
+  fullPriceFromThousandsInput,
+  priceToThousandsInput,
+} from './ThousandsPriceInput';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -45,6 +50,7 @@ const emptyProductForm = (): Product => ({
     quantity: 0,
   })),
   box_quantity: 0,
+  publishToTelegram: true,
   images: [],
 });
 
@@ -253,6 +259,8 @@ export function AddProductModal({
       setSubmitError(null);
       await onSave({
         ...formData,
+        ...(!isEditing ? { price_unit: 'thousands' as const } : {}),
+        publishToTelegram: formData.publishToTelegram !== false,
         box_quantity: Math.max(0, Math.floor(Number(formData.box_quantity || 0))),
         images: formData.images.map(({ uploading, error, data, ...image }) => image),
       });
@@ -301,8 +309,8 @@ export function AddProductModal({
 
   const totalInventory = formData.inventory.reduce((sum, item) => sum + item.quantity, 0);
   const boxQuantity = formData.box_quantity ?? '';
-  const sellingPrice = Number(formData.price || 0);
-  const landingPrice = Number(formData.landingPrice || 0);
+  const sellingPrice = fullPriceFromThousandsInput(String(formData.price || ''));
+  const landingPrice = fullPriceFromThousandsInput(String(formData.landingPrice || ''));
   const hasUploadingImages = formData.images.some((image) => image.uploading);
   const hasFailedImages = formData.images.some((image) => image.error);
   const suggestedColours = artLookup?.colours || [];
@@ -362,8 +370,8 @@ export function AddProductModal({
             name: lookup.product.name,
             type: lookup.product.type,
             seasons: lookup.product.seasons,
-            price: lookup.product.price,
-            landingPrice: lookup.product.landingPrice,
+            price: priceToThousandsInput(lookup.product.price) as unknown as number,
+            landingPrice: priceToThousandsInput(lookup.product.landingPrice) as unknown as number,
           }));
         }
       } catch (error) {
@@ -389,8 +397,8 @@ export function AddProductModal({
       cleanupTempImages(prev.images);
       return {
         ...prev,
-        price: artLookup.product.price,
-        landingPrice: artLookup.product.landingPrice,
+        price: priceToThousandsInput(artLookup.product.price) as unknown as number,
+        landingPrice: priceToThousandsInput(artLookup.product.landingPrice) as unknown as number,
         images: [],
       };
     });
@@ -670,32 +678,22 @@ export function AddProductModal({
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
                       Sotish narxi <span className="text-red-600">*</span>
                     </label>
-                    <div className="relative mt-1">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={formData.price}
-                        onChange={(e) => handleFieldChange('price', e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                        placeholder="Sotish narxini kiriting"
-                      />
-                    </div>
+                    <ThousandsPriceInput
+                      value={String(formData.price || '')}
+                      onChange={(value) => handleFieldChange('price', value)}
+                      required
+                    />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
                       Kelish narxi <span className="text-red-600">*</span>
                     </label>
-                    <div className="relative mt-1">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={formData.landingPrice ?? ''}
-                        onChange={(e) => handleFieldChange('landingPrice', e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-                        placeholder="Kelish narxini kiriting"
-                      />
-                    </div>
+                    <ThousandsPriceInput
+                      value={String(formData.landingPrice || '')}
+                      onChange={(value) => handleFieldChange('landingPrice', value)}
+                      required
+                    />
                   </div>
 
                   {sellingPrice > 0 && landingPrice > 0 && (
@@ -712,6 +710,18 @@ export function AddProductModal({
               {/* Step 5: Inventory */}
               {currentStep === 'inventory' && (
                 <div className="space-y-4">
+                  {!editingProduct && (
+                    <label className="flex items-start gap-3 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200">
+                      <input
+                        type="checkbox"
+                        checked={formData.publishToTelegram !== false}
+                        onChange={(event) => handleFieldChange('publishToTelegram', event.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-700"
+                      />
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">Telegram guruhga yuborish</span>
+                    </label>
+                  )}
+
                   <div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-950">
                     <p className="text-xs text-blue-600 dark:text-blue-400">Jami qoldiq</p>
                     <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">

@@ -5,6 +5,8 @@ const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
 const { pool, testConnection } = require("./src/db");
+const { ensureStoreTelegramColumns } = require("./src/storeTelegramColumns");
+const { publishProductToStoreChannel } = require("./src/telegramChannelPublisher");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -234,10 +236,19 @@ function parsePositiveNumber(value) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
-function parseOptionalPrice(value) {
+function priceUnitMultiplier(payload) {
+  const unit = cleanText(payload?.price_unit || payload?.priceUnit).toLowerCase();
+  return unit === "thousands" ? 1000 : 1;
+}
+
+function applyPriceMultiplier(value, multiplier) {
+  return value === null || value === undefined ? value : value * multiplier;
+}
+
+function parseOptionalPrice(value, multiplier = 1) {
   const text = cleanText(value);
   if (!text) return undefined;
-  return parsePositiveNumber(text);
+  return applyPriceMultiplier(parsePositiveNumber(text), multiplier);
 }
 
 function parseNonNegativeInteger(value) {
@@ -249,12 +260,12 @@ function parseNonNegativeInteger(value) {
 }
 
 // New sold-product feature code starts.
-function parseNonNegativeDecimal(value) {
+function parseNonNegativeDecimal(value, multiplier = 1) {
   const text = cleanText(value).replace(/,/g, ".");
   if (!/^\d+(\.\d{1,2})?$/.test(text)) return null;
 
   const number = Number(text);
-  return Number.isFinite(number) && number >= 0 ? number : null;
+  return Number.isFinite(number) && number >= 0 ? number * multiplier : null;
 }
 // New sold-product feature code ends.
 
@@ -417,6 +428,47 @@ function normalizeImages(images) {
     .filter((image) => image.data || image.tempId || image.path || image.id);
 }
 
+function normalizeTelegramChannelLink(value) {
+  const text = cleanText(value);
+  if (!text) return "";
+  if (/^@[A-Za-z0-9_]+$/.test(text)) return text;
+  if (/^https:\/\/t\.me\/[A-Za-z0-9_]+$/i.test(text)) return text;
+  if (/^https:\/\/telegram\.me\/[A-Za-z0-9_]+$/i.test(text)) return text.replace(/^https:\/\/telegram\.me\//i, "https://t.me/");
+  return "";
+}
+
+function validateStoreSettingsPayload(payload) {
+  const storeName = cleanText(payload.storeName);
+  const channelNameTelegram = cleanText(payload.channelNameTelegram);
+  const channelLinkTelegram = normalizeTelegramChannelLink(payload.channelLinkTelegram);
+  const image = payload.storeImage;
+
+  if (!storeName || storeName.length > 50) {
+    return { error: "Do'kon nomi 1-50 ta belgi bo'lishi kerak." };
+  }
+
+  if (channelNameTelegram.length > 100) {
+    return { error: "Telegram kanal nomi 100 ta belgigacha bo'lishi kerak." };
+  }
+
+  if (cleanText(payload.channelLinkTelegram) && !channelLinkTelegram) {
+    return { error: "Public Telegram kanal linkini @kanal yoki https://t.me/kanal formatida yuboring." };
+  }
+
+  if (image && image.data && !image.type) {
+    return { error: "Do'kon rasmi turi topilmadi." };
+  }
+
+  return {
+    store: {
+      storeName,
+      channelNameTelegram,
+      channelLinkTelegram,
+      storeImage: image
+    }
+  };
+}
+
 function imageExtensionForType(type) {
   if (!IMAGE_MIME_EXTENSIONS[type]) {
     throw Object.assign(new Error("Faqat JPG, PNG, WEBP va GIF rasmlarni yuklash mumkin."), { statusCode: 400 });
@@ -514,13 +566,15 @@ function validateProductPayload(payload) {
   const name = cleanText(payload.name);
   const type = cleanText(payload.type);
   const seasons = normalizeSeasons(payload.seasons);
-  const price = parsePositiveNumber(payload.price);
-  const landingPrice = parsePositiveNumber(payload.landingPrice);
+  const priceMultiplier = priceUnitMultiplier(payload);
+  const price = applyPriceMultiplier(parsePositiveNumber(payload.price), priceMultiplier);
+  const landingPrice = applyPriceMultiplier(parsePositiveNumber(payload.landingPrice), priceMultiplier);
   const colour = cleanText(payload.colour);
   const material = cleanText(payload.material);
   const inventory = normalizeInventoryRows(payload.inventory);
   const boxQuantity = parseNonNegativeInteger(payload.box_quantity ?? payload.boxQuantity ?? 0);
   const images = normalizeImages(payload.images);
+  const publishToTelegram = payload.publishToTelegram !== false && payload.publish_to_telegram !== false;
 
   if (!artNo) return { error: "Artno kiritilishi kerak." };
   if (!SHOE_TYPES.includes(type)) return { error: "To'g'ri oyoq kiyim turini tanlang." };
@@ -546,6 +600,7 @@ function validateProductPayload(payload) {
       material,
       inventory,
       boxQuantity,
+      publishToTelegram,
       images
     }
   };
@@ -729,6 +784,7 @@ async function ensureSoldProductsTables() {
       quantity INT NOT NULL DEFAULT 1,
       sold_price DECIMAL(10,2) NOT NULL,
       landing_price DECIMAL(10,2) NOT NULL,
+      overall_price DECIMAL(10,2) GENERATED ALWAYS AS (sold_price * quantity) STORED,
       sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       isCancelled BOOLEAN NOT NULL DEFAULT FALSE,
 
@@ -779,6 +835,12 @@ async function ensureSoldProductsTables() {
 
   await ensureBooleanColumn("sold_products_pair", "isCancelled", false);
   await ensureBooleanColumn("sold_products_box", "isCancelled", false);
+  if (!(await columnExists("sold_products_box", "overall_price"))) {
+    await pool.query(
+      `ALTER TABLE sold_products_box
+       ADD COLUMN overall_price DECIMAL(10,2) GENERATED ALWAYS AS (sold_price * quantity) STORED AFTER landing_price`
+    );
+  }
 
   if (await tableExists("sold_products")) {
     const legacyLandingPrice = (await columnExists("sold_products", "landing_price"))
@@ -818,9 +880,10 @@ function validateSoldProductPayload(payload) {
   const colourName = cleanText(payload?.colour_name);
   const materialType = cleanText(payload?.material_type);
   const size = cleanText(payload?.size);
-  const soldPrice = parseNonNegativeDecimal(payload?.sold_price);
-  const pairPrice = parseNonNegativeDecimal(payload?.pair_price);
-  const boxPrice = parseNonNegativeDecimal(payload?.box_price ?? payload?.sold_price);
+  const priceMultiplier = priceUnitMultiplier(payload);
+  const soldPrice = parseNonNegativeDecimal(payload?.sold_price, priceMultiplier);
+  const pairPrice = parseNonNegativeDecimal(payload?.pair_price, priceMultiplier);
+  const boxPrice = parseNonNegativeDecimal(payload?.box_price ?? payload?.sold_price, priceMultiplier);
   const quantity = Number(payload?.quantity || 1);
   const boxStockId = Number(payload?.box_stock_id || 0);
   const openBoxIfNeeded = payload?.open_box_if_needed === true;
@@ -860,8 +923,9 @@ function validateSoldProductPayload(payload) {
 
 function validatePriceUpdatePayload(payload) {
   const artNo = cleanText(payload?.artNo ?? payload?.art_no);
-  const landingPrice = parseOptionalPrice(payload?.landingPriceUpdate ?? payload?.landing_price_update);
-  const sellingPrice = parseOptionalPrice(payload?.sellingPrice ?? payload?.selling_price);
+  const priceMultiplier = priceUnitMultiplier(payload);
+  const landingPrice = parseOptionalPrice(payload?.landingPriceUpdate ?? payload?.landing_price_update, priceMultiplier);
+  const sellingPrice = parseOptionalPrice(payload?.sellingPrice ?? payload?.selling_price, priceMultiplier);
 
   if (!artNo) return { error: "Art no kiritilishi kerak." };
   if (landingPrice === null) return { error: "Kelish narxi 0 yoki undan katta son bo'lishi kerak." };
@@ -994,7 +1058,11 @@ async function storeForUser(userId) {
     `SELECT
        s.id,
        s.store_name AS storeName,
-       su.role AS storeRole
+       su.role AS storeRole,
+       s.store_image AS storeImage,
+       s.channel_name_telegram AS channelNameTelegram,
+       s.channel_link_telegram AS channelLinkTelegram,
+       s.channel_id AS channelId
      FROM store_users su
      INNER JOIN store s ON s.id = su.store_id
      WHERE su.user_id = ?
@@ -1162,6 +1230,19 @@ function requireStoreManager(request, response, next) {
 
 function currentStoreId(request) {
   return request.store?.id || defaultStoreId;
+}
+
+async function announceNewProductToChannel(storeId, product) {
+  if (!product) return;
+
+  try {
+    const result = await publishProductToStoreChannel(storeId, product);
+    if (!result.sent && result.reason !== "channel_id_missing") {
+      console.warn(`Product channel announcement skipped: ${result.reason}`);
+    }
+  } catch (error) {
+    console.error(`Product channel announcement failed: ${error.message}`);
+  }
 }
 
 function canViewLandingPrice(request) {
@@ -1731,6 +1812,63 @@ app.get("/api/auth/me", requireAuth, (request, response) => {
   });
 });
 
+app.get("/api/store", requireAuth, requireStoreOwner, async (request, response, next) => {
+  try {
+    const store = await storeForUser(request.user.id);
+    if (!store) {
+      apiMessage(response, "Do'kon topilmadi.", 404);
+      return;
+    }
+
+    apiData(response, store);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/store", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+  const validation = validateStoreSettingsPayload(request.body || {});
+  if (validation.error) {
+    apiMessage(response, validation.error, 400);
+    return;
+  }
+
+  const data = validation.store;
+  const storeId = currentStoreId(request);
+
+  try {
+    let storeImagePath = cleanText(request.body.storeImagePath);
+    if (data.storeImage?.data) {
+      storeImagePath = await saveImageFile(data.storeImage);
+    }
+
+    await pool.execute(
+      `UPDATE store
+       SET store_name = ?,
+           channel_name_telegram = ?,
+           channel_id = CASE
+             WHEN COALESCE(channel_link_telegram, '') <> ? THEN NULL
+             ELSE channel_id
+           END,
+           channel_link_telegram = ?,
+           store_image = COALESCE(NULLIF(?, ''), store_image)
+       WHERE id = ?`,
+      [
+        data.storeName,
+        data.channelNameTelegram || null,
+        data.channelLinkTelegram || "",
+        data.channelLinkTelegram || null,
+        storeImagePath,
+        storeId
+      ]
+    );
+
+    apiData(response, await storeForUser(request.user.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/auth/signout", (_request, response) => {
   clearSessionCookie(response);
   response.status(204).end();
@@ -2022,6 +2160,9 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
 
     const sellerOnly = !canViewLandingPrice(request);
     const storeId = currentStoreId(request);
+    const boxSoldPriceExpression = (await columnExists("sold_products_box", "overall_price"))
+      ? "spb.overall_price"
+      : "(spb.sold_price * spb.quantity)";
     const queryParams = sellerOnly
       ? [storeId, saleDate, saleDate, request.user.id, storeId, saleDate, saleDate, request.user.id]
       : [storeId, saleDate, saleDate, storeId, saleDate, saleDate];
@@ -2069,7 +2210,7 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
            'box' AS saleType,
            bs.size_range AS size,
            spb.quantity,
-           spb.sold_price AS soldPrice,
+           ${boxSoldPriceExpression} AS soldPrice,
            spb.landing_price AS landingPrice,
            spb.sold_at AS soldAt,
            spb.isCancelled AS isCancelled,
@@ -2661,8 +2802,13 @@ app.post("/api/products", requireAuth, requireStoreOwner, requireStoreManager, a
       await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [existing.productId]);
       await connection.commit();
 
+      const updatedProduct = await fetchProduct(existing.productId, storeId, existing.variantId);
+      if (data.publishToTelegram) {
+        await announceNewProductToChannel(storeId, updatedProduct);
+      }
+
       apiData(response, {
-        ...(await fetchProduct(existing.productId, storeId, existing.variantId)),
+        ...updatedProduct,
         inventoryIncremented: true
       });
       return;
@@ -2687,7 +2833,11 @@ app.post("/api/products", requireAuth, requireStoreOwner, requireStoreManager, a
       await saveProductImages(connection, variantInsert.insertId, data.images);
       await connection.commit();
 
-      apiData(response, await fetchProduct(existingProduct.productId, storeId, variantInsert.insertId), 201);
+      const createdProduct = await fetchProduct(existingProduct.productId, storeId, variantInsert.insertId);
+      if (data.publishToTelegram) {
+        await announceNewProductToChannel(storeId, createdProduct);
+      }
+      apiData(response, createdProduct, 201);
       return;
     }
 
@@ -2708,7 +2858,11 @@ app.post("/api/products", requireAuth, requireStoreOwner, requireStoreManager, a
     await saveProductImages(connection, variantInsert.insertId, data.images);
     await connection.commit();
 
-    apiData(response, await fetchProduct(productInsert.insertId, storeId), 201);
+    const createdProduct = await fetchProduct(productInsert.insertId, storeId, variantInsert.insertId);
+    if (data.publishToTelegram) {
+      await announceNewProductToChannel(storeId, createdProduct);
+    }
+    apiData(response, createdProduct, 201);
   } catch (error) {
     await connection.rollback();
     next(error);
@@ -2845,6 +2999,7 @@ function readableDatabaseError(error) {
 app.listen(port, host, async () => {
   try {
     await testConnection();
+    await ensureStoreTelegramColumns(pool);
     await removeArtNoUniqueIndexes();
     await ensureBoxStockTable();
     await ensureSoldProductsTables();

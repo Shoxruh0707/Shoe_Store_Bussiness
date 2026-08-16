@@ -61,6 +61,8 @@ export interface Product {
   boxStock?: BoxStockItem[];
   stockAdditions?: StockAdditionItem[];
   box_quantity?: number;
+  price_unit?: 'thousands';
+  publishToTelegram?: boolean;
   images: ProductImage[];
   createdAt?: string;
   updatedAt?: string;
@@ -98,6 +100,7 @@ export type SoldProductPayload =
       size: string;
       sold_price: number;
       quantity: number;
+      price_unit?: 'thousands';
       open_box_if_needed?: boolean;
     }
   | {
@@ -108,6 +111,7 @@ export type SoldProductPayload =
       quantity: number;
       pair_price: number;
       box_price: number;
+      price_unit?: 'thousands';
       box_stock_id?: number;
     };
 
@@ -177,6 +181,7 @@ export interface PriceUpdatePayload {
   artNo: string;
   landingPriceUpdate?: number;
   sellingPrice?: number;
+  price_unit?: 'thousands';
 }
 
 export interface PriceUpdateResponse {

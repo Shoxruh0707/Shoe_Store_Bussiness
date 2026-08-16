@@ -50,6 +50,9 @@ CREATE TABLE store (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     store_image VARCHAR(500),
     channel_name_telegram VARCHAR(100),
+    channel_link_telegram VARCHAR(255),
+    channel_id VARCHAR(20),
+    text description TEXT,
 
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -328,7 +331,7 @@ CREATE TABLE stock_additions (
         FOREIGN KEY (product_variant_id)
         REFERENCES product_variant(id),
 
-    CONSTRAINT fk_stock_additions_box_stock
+    CONSTRAINT fkf_stock_additions_box_stock
         FOREIGN KEY (box_stock_id)
         REFERENCES box_stock(id)
         ON DELETE SET NULL,
@@ -470,6 +473,9 @@ CREATE TABLE sold_products_box (
 
     sold_price DECIMAL(10,2) NOT NULL,
     landing_price DECIMAL(10,2) NOT NULL,
+    overall_price DECIMAL(10,2) generated ALWAYS AS (sold_price * quantity) STORED,
+
+
 
     sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

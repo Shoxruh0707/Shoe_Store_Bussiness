@@ -43,14 +43,24 @@ export default function AnalyticsPage() {
     [items, soldByFilter]
   );
 
+  const pairItems = useMemo(
+    () => filteredItems.filter((item) => item.saleType !== 'box'),
+    [filteredItems]
+  );
+
+  const boxItems = useMemo(
+    () => filteredItems.filter((item) => item.saleType === 'box'),
+    [filteredItems]
+  );
+
   const totals = useMemo(
     () =>
       filteredItems.filter((item) => !item.isCancelled).reduce(
         (summary, item) => ({
           quantity: summary.quantity + item.quantity,
-          revenue: summary.revenue + item.soldPrice * item.quantity,
+          revenue: summary.revenue + item.soldPrice,
           landing: summary.landing + Number(item.landingPrice || 0) * item.quantity,
-          profit: summary.profit + (item.soldPrice - Number(item.landingPrice || 0)) * item.quantity,
+          profit: summary.profit + item.soldPrice - Number(item.landingPrice || 0) * item.quantity,
         }),
         { quantity: 0, revenue: 0, landing: 0, profit: 0 }
       ),
@@ -92,6 +102,106 @@ export default function AnalyticsPage() {
     } finally {
       setCancellingId(null);
     }
+  };
+
+  const renderSalesTable = (sectionItems: SoldProductAnalyticsItem[], saleType: 'pair' | 'box') => {
+    if (sectionItems.length === 0) {
+      return (
+        <div className="py-8 text-center">
+          <BarChart3 className="mx-auto h-9 w-9 text-gray-400 dark:text-gray-600" />
+          <p className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+            {saleType === 'pair' ? 'Dona sotuv yo\'q' : 'Quti sotuv yo\'q'}
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rasm</th>
+              <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Art no</th>
+              <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rang</th>
+              <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Material</th>
+              <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Razmer</th>
+              {saleType === 'box' && (
+                <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Soni</th>
+              )}
+              <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sotilgan narx</th>
+              {canViewLandingPrice && (
+                <>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Kelish narxi</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Foyda</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sotuvchi</th>
+                  <th className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">Amal</th>
+                </>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {sectionItems.map((item) => {
+              const landingTotal = Number(item.landingPrice || 0) * item.quantity;
+
+              return (
+                <tr
+                  key={item.id}
+                  className={`border-b border-gray-200 dark:border-gray-800 ${
+                    item.isCancelled ? 'bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-100' : ''
+                  }`}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
+                      {item.imagePath ? (
+                        <img src={item.imagePath} alt={item.artNo} className="h-full w-full object-cover" />
+                      ) : (
+                        <ImageIcon className="h-5 w-5 text-gray-400" />
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-bold text-gray-900 dark:text-gray-100">{item.artNo}</td>
+                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.colour}</td>
+                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.material}</td>
+                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.size}</td>
+                  {saleType === 'box' && (
+                    <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{item.quantity}</td>
+                  )}
+                  <td className="px-4 py-3 font-semibold text-green-700 dark:text-green-300">{money(item.soldPrice)}</td>
+                  {canViewLandingPrice && (
+                    <>
+                      <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{money(landingTotal)}</td>
+                      <td className="px-4 py-3 font-semibold text-blue-700 dark:text-blue-300">
+                        {money(item.soldPrice - landingTotal)}
+                      </td>
+                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.soldBy || 'Yo\'q'}</td>
+                      <td className="px-4 py-3 text-right">
+                        {item.isCancelled ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 dark:bg-red-900 dark:text-red-200">
+                            <XCircle className="h-3.5 w-3.5" />
+                            Bekor qilingan
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => cancelSale(item)}
+                            disabled={Boolean(cancellingId)}
+                            className="inline-flex items-center gap-1 rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-600"
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                            {cancellingId === item.id ? 'Bekor qilinmoqda...' : 'Bekor qilish'}
+                          </button>
+                        )}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
   };
 
   return (
@@ -208,81 +318,22 @@ export default function AnalyticsPage() {
           )}
 
           {!loading && filteredItems.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rasm</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Art no</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Rang</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Material</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Turi</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Razmer</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sotilgan narx</th>
-                    {canViewLandingPrice && (
-                      <>
-                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Kelish narxi</th>
-                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Foyda</th>
-                        <th className="px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100">Sotuvchi</th>
-                        <th className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">Amal</th>
-                      </>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredItems.map((item) => (
-                    <tr
-                      key={item.id}
-                      className={`border-b border-gray-200 dark:border-gray-800 ${
-                        item.isCancelled ? 'bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-100' : ''
-                      }`}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
-                          {item.imagePath ? (
-                            <img src={item.imagePath} alt={item.artNo} className="h-full w-full object-cover" />
-                          ) : (
-                            <ImageIcon className="h-5 w-5 text-gray-400" />
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 font-bold text-gray-900 dark:text-gray-100">{item.artNo}</td>
-                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.colour}</td>
-                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.material}</td>
-                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.type}</td>
-                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.size}</td>
-                      <td className="px-4 py-3 font-semibold text-green-700 dark:text-green-300">{money(item.soldPrice)}</td>
-                      {canViewLandingPrice && (
-                        <>
-                          <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{money(item.landingPrice || 0)}</td>
-                          <td className="px-4 py-3 font-semibold text-blue-700 dark:text-blue-300">
-                            {money((item.soldPrice - Number(item.landingPrice || 0)) * item.quantity)}
-                          </td>
-                          <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{item.soldBy || 'Yo\'q'}</td>
-                          <td className="px-4 py-3 text-right">
-                            {item.isCancelled ? (
-                              <span className="inline-flex items-center gap-1 rounded bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 dark:bg-red-900 dark:text-red-200">
-                                <XCircle className="h-3.5 w-3.5" />
-                                Bekor qilingan
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => cancelSale(item)}
-                                disabled={Boolean(cancellingId)}
-                                className="inline-flex items-center gap-1 rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-600"
-                              >
-                                <XCircle className="h-3.5 w-3.5" />
-                                {cancellingId === item.id ? 'Bekor qilinmoqda...' : 'Bekor qilish'}
-                              </button>
-                            )}
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="divide-y divide-gray-200 dark:divide-gray-800">
+              <section>
+                <div className="flex items-center justify-between bg-white px-4 py-3 dark:bg-gray-900">
+                  <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Dona sotuvlar</h2>
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">{pairItems.length}</span>
+                </div>
+                {renderSalesTable(pairItems, 'pair')}
+              </section>
+
+              <section>
+                <div className="flex items-center justify-between bg-white px-4 py-3 dark:bg-gray-900">
+                  <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Quti sotuvlar</h2>
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">{boxItems.length}</span>
+                </div>
+                {renderSalesTable(boxItems, 'box')}
+              </section>
             </div>
           )}
         </div>
