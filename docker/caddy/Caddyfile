@@ -14,7 +14,8 @@
 	}
 
 	handle {
-		reverse_proxy frontend:3001
+		header Content-Type application/json
+		respond `{"success":false,"error":"Not found.","message":"Not found."}` 404
 	}
 
 	header {

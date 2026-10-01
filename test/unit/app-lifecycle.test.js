@@ -61,3 +61,17 @@ test('runtime close releases resources', async () => {
   const runtime=await startServer({pool,config:{port:0,host:'127.0.0.1'},createApp:()=>express(),checkSchema:async()=>{},prepareUploads:async()=>{}});
   assert.ok(runtime.server.listening); await runtime.close();assert.equal(runtime.server.listening,false);assert.equal(ended,1);assert.equal(released,1);
 });
+
+test('deployment contains only api, migrator, mysql and caddy', () => {
+  const dockerfile=fs.readFileSync(path.resolve('Dockerfile'),'utf8');
+  const compose=fs.readFileSync(path.resolve('docker-compose.yml'),'utf8');
+  const caddy=fs.readFileSync(path.resolve('docker/caddy/Caddyfile'),'utf8');
+  assert.doesNotMatch(dockerfile,/AS (?:frontend|bot)\b/i);
+  assert.doesNotMatch(compose,/^  (?:frontend|bot|channel-bot):/m);
+  for(const service of ['mysql','migrate','backend','caddy'])assert.match(compose,new RegExp(`^  ${service}:`,'m'));
+  assert.match(compose,/migrate:\s*[\s\S]*?condition: service_completed_successfully/);
+  assert.match(compose,/mysql_data:\/var\/lib\/mysql/);
+  assert.match(compose,/uploads:\/app\/public\/uploads/);
+  assert.equal((caddy.match(/reverse_proxy backend:3000/g)||[]).length,2);
+  assert.doesNotMatch(caddy,/reverse_proxy frontend/);
+});

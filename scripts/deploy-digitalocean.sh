@@ -11,6 +11,8 @@ if [ ! -f .env ]; then
 fi
 
 docker compose config --quiet
-docker compose pull mysql caddy || true
+docker compose pull mysql caddy
+docker compose up -d mysql
+docker compose run --rm --build migrate
 docker compose up -d --build --remove-orphans
 docker compose ps

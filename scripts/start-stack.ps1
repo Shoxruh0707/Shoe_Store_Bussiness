@@ -1,61 +1,25 @@
-param(
-  [switch]$Restart
-)
+param([switch]$Restart)
 
 $ErrorActionPreference = "Stop"
+$root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$logDir = Join-Path $root "logs"
+$pidFile = Join-Path $logDir "backend.pid"
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
-$Root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$Logs = Join-Path $Root "logs"
-$Ngrok = Join-Path $Root "tools\ngrok\ngrok.exe"
+if ($Restart -and (Test-Path $pidFile)) {
+    $backendPid = [int](Get-Content $pidFile)
+    Stop-Process -Id $backendPid -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+}
 
-New-Item -ItemType Directory -Force -Path $Logs | Out-Null
-
-function Stop-ProjectProcess {
-  $processes = Get-CimInstance Win32_Process |
-    Where-Object {
-      ($_.Name -eq "node.exe" -and (
-        $_.CommandLine -like "*server.js*" -or
-        $_.CommandLine -like "*src/telegramBot.js*" -or
-        $_.CommandLine -like "*src/telegramChannelBot.js*" -or
-        $_.CommandLine -like "*run channel-bot*" -or
-        $_.CommandLine -like "*--prefix*frontend*run dev*" -or
-        $_.CommandLine -like "*next*dev -p 3001*" -or
-        $_.CommandLine -like "*next*start-server.js*" -or
-        $_.CommandLine -like "*frontend*.next*"
-      )) -or
-      ($_.Name -eq "ngrok.exe" -and $_.CommandLine -like "*AdminShoeStore*")
+if (Test-Path $pidFile) {
+    $backendPid = [int](Get-Content $pidFile)
+    if (Get-Process -Id $backendPid -ErrorAction SilentlyContinue) {
+        Write-Host "Backend is already running (PID $backendPid)."
+        exit 0
     }
-
-  foreach ($process in $processes) {
-    Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
-  }
 }
 
-function Start-LoggedProcess {
-  param(
-    [string]$Name,
-    [string]$FilePath,
-    [string[]]$ArgumentList
-  )
-
-  Start-Process `
-    -FilePath $FilePath `
-    -ArgumentList $ArgumentList `
-    -WorkingDirectory $Root `
-    -RedirectStandardOutput (Join-Path $Logs "$Name.log") `
-    -RedirectStandardError (Join-Path $Logs "$Name.err.log") `
-    -WindowStyle Hidden
-}
-
-if ($Restart) {
-  Stop-ProjectProcess
-  Start-Sleep -Seconds 2
-}
-
-Start-LoggedProcess -Name "backend" -FilePath "node" -ArgumentList @("server.js")
-Start-LoggedProcess -Name "frontend" -FilePath "npm.cmd" -ArgumentList @("--prefix", "frontend", "run", "dev")
-Start-LoggedProcess -Name "bot" -FilePath "npm.cmd" -ArgumentList @("run", "bot")
-Start-LoggedProcess -Name "channel-bot" -FilePath "npm.cmd" -ArgumentList @("run", "channel-bot")
-Start-LoggedProcess -Name "ngrok" -FilePath $Ngrok -ArgumentList @("http", "3001", "--log=stdout")
-
-Write-Host "Started stack. Logs are in $Logs"
+$process = Start-Process -FilePath "node" -ArgumentList "server.js" -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDir "backend.log") -RedirectStandardError (Join-Path $logDir "backend.err.log") -PassThru
+$process.Id | Set-Content $pidFile
+Write-Host "Backend started (PID $($process.Id)). Logs are in $logDir"
