@@ -1,9 +1,3 @@
-CREATE DATABASE IF NOT EXISTS shoes_store_db
-CHARACTER SET utf8mb4
-COLLATE utf8mb4_unicode_ci;
-
-USE shoes_store_db;
-
 -- =====================================================
 -- BRANDS
 -- =====================================================
@@ -51,8 +45,8 @@ CREATE TABLE store (
     store_image VARCHAR(500),
     channel_name_telegram VARCHAR(100),
     channel_link_telegram VARCHAR(255),
-    channel_id VARCHAR(20),
-    text description TEXT,
+    channel_id VARCHAR(45),
+    description TEXT,
 
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

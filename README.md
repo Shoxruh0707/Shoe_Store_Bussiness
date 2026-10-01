@@ -1,289 +1,91 @@
-# Admin Shoe Store Inventory
+# Admin Shoe Store Backend API
 
-Inventory web app for managing shoe products, stock, Telegram authentication, and store ownership backed by MySQL.
+Backend-only inventory service built with Node.js, Express, and MySQL. Client applications belong in separate projects and communicate with this service through HTTPS JSON APIs.
 
-## What This Project Runs
+## Architecture
 
-- Backend: Node.js + Express
-- Database: MySQL 8+
-- Frontend: Next.js app in `frontend/`
-- Authentication: Telegram Bot + Telegram Mini App
-- Public tunnel: optional ngrok on port `3000`
+- `server.js`: REST API, session authentication, authorization, inventory and sales rules, and upload handling.
+- `src/db.js`: MySQL connection pool.
+- `src/db/migrations/`: canonical schema and versioned migration code.
+- `scripts/migrate.js`: explicit migration status/apply command.
+- `public/uploads/`: persistent product media served from `/uploads`.
+- `docker-compose.yml`: MySQL, one-shot migrator, backend, and Caddy HTTPS proxy.
 
-## Start Backend
+Application startup checks migration readiness and fails before listening when schema work is pending. It never changes the schema automatically.
 
-1. Install dependencies once:
+## Local setup
 
-   ```powershell
-   npm install
-   ```
-
-2. Make sure `.env` exists and has your local values.
-
-3. Start the backend:
-
-   ```powershell
-   npm start
-   ```
-
-4. Start the frontend in a second terminal:
-
-   ```powershell
-   npm run frontend:dev
-   ```
-
-5. Start the Telegram bot in another terminal when you need Telegram auth:
-
-   ```powershell
-   npm run bot
-   ```
-
-5. Open the app from Telegram by pressing the bot's `📦 Open Inventory` button.
-
-For local Telegram testing, expose the frontend with HTTPS and set `TELEGRAM_WEBAPP_URL` to the public `/inventory` URL. The frontend proxies `/api` requests to the backend.
+Requirements: Node.js 22+ and MySQL 8+.
 
 ```powershell
-E:\AdminShoeStore\tools\ngrok\ngrok.exe http 3001 --log=stdout
+npm.cmd ci
+Copy-Item .env.example .env
 ```
 
-The Mini App URL should look like:
-
-```text
-https://your-ngrok-domain.ngrok-free.app/inventory
-```
-
-## Development Mode
-
-Use watch mode when you want the server to restart automatically after file edits:
+Edit `.env` with local credentials. Configure the separate `MIGRATION_DB_*` values, then initialize or upgrade the selected database:
 
 ```powershell
-npm run dev
+npm.cmd run db:status
+npm.cmd run db:migrate
+npm.cmd run db:status
+npm.cmd start
 ```
 
-Run the redesigned frontend separately:
+The API listens on `http://127.0.0.1:3000` by default. `GET /api/health` checks database connectivity.
+
+## Authentication
+
+`POST /api/auth/login` accepts JSON:
+
+```json
+{"phoneNumber":"+998901234567","password":"your-password"}
+```
+
+The backend verifies the existing bcrypt password hash and returns the user and active store. A successful response sets a signed, HTTP-only `session` cookie. Send that cookie on protected API requests. Invalid users and passwords share one generic `401` response. `GET /api/auth/me` reads the session and `POST /api/auth/signout` clears it.
+
+Production requires authentication, a minimum 32-byte non-placeholder `SESSION_SECRET`, an HTTPS `PUBLIC_URL`, and secure cookies. Users need an active `store_users` membership for store-scoped inventory endpoints.
+
+## API surface
+
+All application operations use `/api`; unknown routes return JSON 404 responses.
+
+- `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/signout`
+- `GET /api/health`, `GET /api/meta`
+- `GET|PUT /api/store`
+- `GET|POST /api/products`
+- `GET|PUT|DELETE /api/products/:id`
+- product matching, price, pair inventory, box stock, stock-addition, sales, and sale-cancellation routes under `/api`
+- temporary product media under `/api/uploads/temp`; persisted media under `/uploads`
+
+The implementation enforces role and store scope on every protected operation. Landing cost visibility is restricted to owners and managers.
+
+## Tests
 
 ```powershell
-npm run frontend:dev
+npm.cmd test
+docker compose -f docker-compose.test.yml up -d --wait
+$env:TEST_DB_HOST="127.0.0.1"
+$env:TEST_DB_PORT="3307"
+$env:TEST_DB_USER="root"
+$env:TEST_DB_PASSWORD="isolated-test-only"
+$env:TEST_DB_NAME="shoe_migration_test_local"
+npm.cmd run test:integration
+docker compose -f docker-compose.test.yml down
 ```
 
-## Docker Deployment
+Integration tests create randomly suffixed disposable databases and drop only databases they created. They never fall back to application database credentials.
 
-The project includes a production Docker setup for a DigitalOcean Droplet:
-
-- `Dockerfile` builds the Express backend, Telegram bot, and Next.js frontend.
-- `docker-compose.yml` runs MySQL, backend, frontend, bot, and Caddy HTTPS proxy.
-- `.env.production.example` contains the required production environment values.
-
-On the Droplet:
+## Docker deployment
 
 ```bash
 cp .env.production.example .env
-nano .env
-docker compose up -d --build
+# Replace every placeholder, then:
+docker compose config --quiet
+docker compose up -d mysql
+docker compose run --rm --build migrate
+docker compose up -d --build --remove-orphans
 ```
 
-See `docs/digitalocean-deployment.md` for the full deployment checklist.
+Caddy publishes ports 80 and 443 and proxies `/api/*` plus `/uploads/*` to the backend. MySQL and the backend remain on the private Compose network. Named volumes preserve `mysql_data`, `uploads`, `caddy_data`, and `caddy_config` across container replacement.
 
-To use a different domain, point that domain's DNS to the server and change only
-`DOMAIN` in the production `.env` file. The app derives its public URL, backend
-redirects, CORS origin, Telegram Mini App URL, and Caddy HTTPS certificate from
-that value by default.
-
-## Full Stack With Logs
-
-To start or restart the backend, frontend, Telegram bot, and ngrok together, run:
-
-```powershell
-npm run stack:restart
-```
-
-All runtime logs from that command are saved in `logs/`:
-
-- `logs/backend.log`
-- `logs/backend.err.log`
-- `logs/frontend.log`
-- `logs/frontend.err.log`
-- `logs/bot.log`
-- `logs/bot.err.log`
-- `logs/ngrok.log`
-- `logs/ngrok.err.log`
-
-## Restart Backend
-
-If you changed backend code or `.env`, restart the process.
-
-Basic restart:
-
-1. Stop the current Node process.
-2. Start it again with:
-
-   ```powershell
-   npm start
-   ```
-
-If port `3000` is busy, find the Node process and stop it:
-
-```powershell
-netstat -ano | findstr :3000
-taskkill /PID <PID_FROM_NETSTAT> /F
-```
-
-Then start the server again:
-
-```powershell
-npm start
-```
-
-## Restart After Config Change
-
-When you change `.env`, you must restart the backend because `dotenv` is loaded at process start.
-
-Typical flow:
-
-```powershell
-taskkill /PID <PID_FROM_NETSTAT> /F
-npm start
-```
-
-## Telegram Authentication
-
-Traditional website sign-in and signup pages have been removed. Users start in the Telegram bot, complete onboarding there, and open `/inventory` as a Telegram Mini App.
-
-The bot collects:
-
-- first name
-- last name
-- phone number through Telegram's native contact share button
-- account type: Seller or Store Owner
-- store name, phone, and description for Store Owner accounts
-
-## ngrok
-
-The project has been used with ngrok to expose the local backend.
-
-Run ngrok against the frontend app port:
-
-```powershell
-E:\AdminShoeStore\tools\ngrok\ngrok.exe http 3001 --log=stdout
-```
-
-ngrok local inspector:
-
-```text
-http://127.0.0.1:4040
-```
-
-The public forwarding URL changes each time ngrok starts unless you are using a reserved domain in your ngrok account.
-
-## Environment Variables
-
-Recommended `.env` values:
-
-```env
-PORT=3000
-FRONTEND_URL=http://localhost:3001
-PUBLIC_URL=http://localhost:3001
-
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_password_here
-DB_NAME=shoes_store_db
-
-SESSION_SECRET=replace_with_a_long_random_value
-
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_BOT_USERNAME=
-TELEGRAM_WEBAPP_URL=https://your-public-domain.example/inventory
-TELEGRAM_AUTH_MAX_AGE_SECONDS=86400
-TELEGRAM_POLL_TIMEOUT_SECONDS=25
-
-API_AUTH_REQUIRED=true
-CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
-NEXT_ALLOWED_DEV_ORIGINS=
-
-DEFAULT_STORE_ID=1
-DEFAULT_STORE_NAME=Default Store
-DEFAULT_OWNER_PHONE=+998000000001
-
-DEFAULT_BRAND_NAME=Unbranded
-```
-
-Notes:
-
-- `TELEGRAM_BOT_TOKEN` is used to verify Mini App `initData`; never commit it.
-- `TELEGRAM_WEBAPP_URL` must point to the HTTPS `/inventory` URL configured for the bot.
-- `PUBLIC_URL`/`FRONTEND_URL` is where the backend redirects page requests.
-- `DOMAIN` in production is the hostname Caddy serves with HTTPS. Change it to
-  deploy the same project under another domain without code changes.
-- `API_AUTH_REQUIRED=false` is useful only for local frontend testing without Telegram auth.
-- `SESSION_SECRET` signs the internal app session cookie created after Telegram verification.
-- `DEFAULT_STORE_ID` is used by the legacy/default product flow.
-- `DEFAULT_BRAND_NAME` is used because the current product form does not ask for brand.
-
-## Database Setup
-
-For a new database, import the schema from `shoes_store_database_ddl.sql` into MySQL 8+.
-
-For an existing database, run:
-
-```sql
-migrations/2026_07_01_add_telegram_auth_to_users.sql
-migrations/2026_07_05_add_product_landing_price.sql
-```
-
-Expected tables include:
-
-- `users`
-- `store`
-- `store_users`
-- `seller_store_requests`
-- `brands`
-- `materials`
-- `shoe_type`
-- `colours`
-- `products`
-- `product_seasons`
-- `product_variant`
-- `product_images`
-- `inventory`
-- `box_stock`
-- `sold_products_pair`
-- `sold_products_box`
-
-## Backend Routes
-
-Page routes are served by the Next.js frontend on port `3001`. The Express backend redirects `/` and `/inventory` to `PUBLIC_URL`/`FRONTEND_URL`.
-
-Useful API endpoints:
-
-- `GET /api/health`
-- `GET /api/meta`
-- `GET /api/auth/me`
-- `POST /api/auth/signout`
-- `POST /api/telegram/auth`
-- `GET /api/products`
-- `POST /api/products`
-- `PUT /api/products/:id`
-- `DELETE /api/products/:id`
-
-## Common Troubleshooting
-
-If `/inventory` says to open from Telegram, use the bot's `📦 Open Inventory` button. A normal browser does not provide Telegram Mini App `initData`.
-
-If the app says the database is unavailable:
-
-- confirm MySQL is running
-- confirm the `.env` database values are correct
-- confirm `shoes_store_db` exists
-
-If port `3000` is already in use:
-
-- stop the old Node process
-- or change `PORT` in `.env`
-
-## Notes
-
-- Password login is no longer used for new access; retained password hashes are only for migration compatibility.
-- Admin/store-owner inventory is scoped by `store_id`.
-- Store owner onboarding creates a store automatically. Seller accounts need a store relationship before inventory access can be granted safely.
+See [database migration operations](docs/backend-migration-operations.md) and [server deployment](docs/digitalocean-deployment.md) before a production rollout.
