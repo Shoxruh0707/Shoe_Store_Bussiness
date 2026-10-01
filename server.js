@@ -1,34 +1,34 @@
-require("dotenv").config();
-
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
-const { pool, testConnection } = require("./src/db");
-const { ensureStoreTelegramColumns } = require("./src/storeTelegramColumns");
-const { publishProductToStoreChannel } = require("./src/telegramChannelPublisher");
 
+
+
+
+function createApp({ pool, config = {}, clock = Date.now, uploads = {}, logger = console }) {
+const env = config;
+async function testConnection() { const connection = await pool.getConnection(); try { await connection.ping(); } finally { connection.release(); } }
 const app = express();
-const port = Number(process.env.PORT || 3000);
-const host = process.env.HOST || "0.0.0.0";
-const defaultStoreId = Number(process.env.DEFAULT_STORE_ID || 1);
-const defaultBrandName = process.env.DEFAULT_BRAND_NAME || "Unbranded";
-const defaultStoreName = process.env.DEFAULT_STORE_NAME || "Default Store";
-const defaultOwnerPhone = process.env.DEFAULT_OWNER_PHONE || "+998000000001";
+function route(method, url, ...handlers) {
+  app[method](url, ...handlers.map(handler => (request, response, next) => {
+    try { Promise.resolve(handler(request, response, next)).catch(next); } catch (error) { next(error); }
+  }));
+}
+const port = Number(env.PORT || 3000);
+const host = env.HOST || "0.0.0.0";
+const defaultStoreId = Number(env.DEFAULT_STORE_ID || 1);
+const defaultBrandName = env.DEFAULT_BRAND_NAME || "Unbranded";
+const defaultStoreName = env.DEFAULT_STORE_NAME || "Default Store";
+const defaultOwnerPhone = env.DEFAULT_OWNER_PHONE || "+998000000001";
 const defaultPasswordHash =
-  process.env.DEFAULT_OWNER_PASSWORD_HASH || "$2b$10$0000000000000000000000000000000000000000000000000000";
-const sessionSecret = process.env.SESSION_SECRET || "change-this-session-secret";
-const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN || "";
-const telegramAuthMaxAgeSeconds = Number(process.env.TELEGRAM_AUTH_MAX_AGE_SECONDS || 86400);
-const apiAuthRequired = process.env.API_AUTH_REQUIRED !== "false";
-const isProduction = process.env.NODE_ENV === "production";
-const domain = cleanDomain(process.env.DOMAIN || "");
-const publicUrl = normalizeUrl(
-  process.env.PUBLIC_URL || process.env.FRONTEND_URL || (domain ? `https://${domain}` : "") || "http://localhost:3001"
-);
-const frontendUrl = publicUrl;
-const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE
-  ? process.env.SESSION_COOKIE_SECURE === "true"
+  env.DEFAULT_OWNER_PASSWORD_HASH || "$2b$10$0000000000000000000000000000000000000000000000000000";
+const sessionSecret = env.SESSION_SECRET || "change-this-session-secret";
+const apiAuthRequired = env.API_AUTH_REQUIRED !== "false";
+const domain = cleanDomain(env.DOMAIN || "");
+const publicUrl = normalizeUrl(env.PUBLIC_URL || (domain ? `https://${domain}` : ""));
+const sessionCookieSecure = env.SESSION_COOKIE_SECURE
+  ? env.SESSION_COOKIE_SECURE === "true"
   : publicUrl.startsWith("https://");
 const corsOrigins = buildCorsOrigins();
 
@@ -51,8 +51,8 @@ const SEASON_DB_VALUES = {
   Winter: "winter"
 };
 const SIZES = ["33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44"];
-const UPLOAD_DIR = path.join(__dirname, "public", "uploads");
-const TEMP_UPLOAD_DIR = path.join(UPLOAD_DIR, "temp");
+const UPLOAD_DIR = uploads.rootDir || path.join(__dirname, "public", "uploads");
+const TEMP_UPLOAD_DIR = uploads.tempDir || path.join(UPLOAD_DIR, "temp");
 const IMAGE_MIME_EXTENSIONS = {
   "image/jpeg": ".jpg",
   "image/png": ".png",
@@ -73,79 +73,15 @@ function normalizeUrl(value) {
     .replace(/\/$/, "");
 }
 
-function originFromUrl(value) {
-  try {
-    return new URL(value).origin;
-  } catch (_error) {
-    return "";
-  }
-}
-
-function originsFromDomains(value, includeHttp = false) {
-  return String(value || "")
-    .split(",")
-    .map(cleanDomain)
-    .filter(Boolean)
-    .flatMap((hostName) => (includeHttp ? [`https://${hostName}`, `http://${hostName}`] : [`https://${hostName}`]));
-}
-
 function buildCorsOrigins() {
-  const configuredOrigins = String(process.env.CORS_ORIGINS || "")
+  return [...new Set(String(env.CORS_ORIGINS || "")
     .split(",")
     .map(normalizeUrl)
-    .filter(Boolean);
-  const defaultOrigins = [
-    originFromUrl(publicUrl),
-    ...originsFromDomains(process.env.DOMAIN, !isProduction),
-    ...originsFromDomains(process.env.ADDITIONAL_DOMAINS, !isProduction)
-  ];
-  const localOrigins = isProduction
-    ? []
-    : ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"];
-
-  return [...new Set([...configuredOrigins, ...defaultOrigins, ...localOrigins].filter(Boolean))];
+    .filter(Boolean))];
 }
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
-
-const PAGE_PATHS = new Set(["/", "/inventory"]);
-
-function decodePathSafely(value) {
-  let decoded = value;
-
-  for (let index = 0; index < 2; index += 1) {
-    try {
-      const next = decodeURIComponent(decoded);
-      if (next === decoded) break;
-      decoded = next;
-    } catch (_error) {
-      break;
-    }
-  }
-
-  return decoded;
-}
-
-function normalizePagePath(value) {
-  const decodedPath = decodePathSafely(value);
-  const normalizedPath = decodedPath.replace(/[\\\/\s]+$/g, "") || "/";
-  return PAGE_PATHS.has(normalizedPath) ? normalizedPath : "";
-}
-
-app.use((request, response, next) => {
-  const queryIndex = request.originalUrl.indexOf("?");
-  const rawPath = queryIndex === -1 ? request.originalUrl : request.originalUrl.slice(0, queryIndex);
-  const query = queryIndex === -1 ? "" : request.originalUrl.slice(queryIndex);
-  const normalizedPath = normalizePagePath(rawPath);
-
-  if (normalizedPath !== rawPath && PAGE_PATHS.has(normalizedPath)) {
-    response.redirect(302, `${normalizedPath}${query}`);
-    return;
-  }
-
-  next();
-});
 
 app.use(express.json({ limit: "25mb" }));
 app.use("/uploads", express.static(UPLOAD_DIR));
@@ -156,7 +92,7 @@ app.use((request, response, next) => {
     response.setHeader("Access-Control-Allow-Origin", origin);
     response.setHeader("Vary", "Origin");
     response.setHeader("Access-Control-Allow-Credentials", "true");
-    response.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Telegram-Init-Data");
+    response.setHeader("Access-Control-Allow-Headers", "Content-Type");
     response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   }
 
@@ -173,55 +109,13 @@ function cleanText(value) {
   return String(value).trim();
 }
 
-function parseCookies(header = "") {
-  return String(header)
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .reduce((cookies, part) => {
-      const separatorIndex = part.indexOf("=");
-      if (separatorIndex === -1) return cookies;
-      const key = decodeURIComponent(part.slice(0, separatorIndex));
-      const value = decodeURIComponent(part.slice(separatorIndex + 1));
-      cookies[key] = value;
-      return cookies;
-    }, {});
-}
-
-function base64Url(input) {
-  return Buffer.from(input).toString("base64url");
-}
-
-function signSession(payload) {
-  const body = base64Url(JSON.stringify(payload));
-  const signature = crypto.createHmac("sha256", sessionSecret).update(body).digest("base64url");
-  return `${body}.${signature}`;
-}
-
-function readSession(request) {
-  const token = parseCookies(request.headers.cookie).session;
-  if (!token || !token.includes(".")) return null;
-
-  const [body, signature] = token.split(".");
-  const expected = crypto.createHmac("sha256", sessionSecret).update(body).digest("base64url");
-  if (Buffer.byteLength(signature) !== Buffer.byteLength(expected)) return null;
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-
-  try {
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-    if (!payload.userId || !payload.role) return null;
-    return payload;
-  } catch (_error) {
-    return null;
-  }
-}
+const sessionCodec = require("./src/auth/legacy-session").createLegacySessionCodec({ secret: sessionSecret, clock });
+const { verifyPassword } = require("./src/auth/password");
+const DUMMY_PASSWORD_HASH = "$2b$10$esc2kYYKPeZ1pFrXx9PESOCMk9zq.y2swfX5DqxMmz0e0tHuF.hdG";
+function readSession(request) { return sessionCodec.decode(request.headers.cookie); }
 
 function setSessionCookie(response, user) {
-  const token = signSession({
-    userId: user.id,
-    role: user.role,
-    issuedAt: Date.now()
-  });
+  const token = sessionCodec.encode({ userId: user.id, role: user.role });
   const secure = sessionCookieSecure ? "; Secure" : "";
   response.setHeader("Set-Cookie", `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`);
 }
@@ -272,11 +166,6 @@ function parseNonNegativeDecimal(value, multiplier = 1) {
 function validatePhone(value) {
   const phone = cleanText(value);
   return /^\+?[0-9\s-]{7,20}$/.test(phone) ? phone : "";
-}
-
-function validateTelegramUsername(value) {
-  const username = cleanText(value).replace(/^@/, "");
-  return /^[A-Za-z0-9_]{5,32}$/.test(username) ? username : "";
 }
 
 function normalizeSeasons(seasons) {
@@ -333,7 +222,7 @@ function inventoryFromSizeRange(sizeRange) {
       const quantity = rangeMatch[3] === undefined ? 1 : Number(rangeMatch[3]);
 
       if (startIndex === -1 || endIndex === -1 || startIndex > endIndex || !Number.isInteger(quantity) || quantity <= 0) {
-        throw Object.assign(new Error("Box size range is invalid."), { statusCode: 400 });
+        throw Object.assign(new Error("Box size range is invalid."), { expose: true, statusCode: 400 });
       }
 
       for (const size of SIZES.slice(startIndex, endIndex + 1)) {
@@ -347,7 +236,7 @@ function inventoryFromSizeRange(sizeRange) {
     const quantity = match?.[2] === undefined ? 1 : Number(match[2]);
 
     if (!match || !SIZES.includes(normalizedSize) || !Number.isInteger(quantity) || quantity <= 0) {
-      throw Object.assign(new Error("Box size range is invalid."), { statusCode: 400 });
+      throw Object.assign(new Error("Box size range is invalid."), { expose: true, statusCode: 400 });
     }
 
     quantitiesBySize.set(normalizedSize, (quantitiesBySize.get(normalizedSize) || 0) + quantity);
@@ -362,7 +251,7 @@ function inventoryFromSizeRange(sizeRange) {
 function normalizeSizeRange(sizeRange) {
   const inventory = inventoryFromSizeRange(sizeRange);
   if (!inventory.length) {
-    throw Object.assign(new Error("Box size range is invalid."), { statusCode: 400 });
+    throw Object.assign(new Error("Box size range is invalid."), { expose: true, statusCode: 400 });
   }
   return sizeRangeFromInventory(inventory);
 }
@@ -428,31 +317,12 @@ function normalizeImages(images) {
     .filter((image) => image.data || image.tempId || image.path || image.id);
 }
 
-function normalizeTelegramChannelLink(value) {
-  const text = cleanText(value);
-  if (!text) return "";
-  if (/^@[A-Za-z0-9_]+$/.test(text)) return text;
-  if (/^https:\/\/t\.me\/[A-Za-z0-9_]+$/i.test(text)) return text;
-  if (/^https:\/\/telegram\.me\/[A-Za-z0-9_]+$/i.test(text)) return text.replace(/^https:\/\/telegram\.me\//i, "https://t.me/");
-  return "";
-}
-
 function validateStoreSettingsPayload(payload) {
   const storeName = cleanText(payload.storeName);
-  const channelNameTelegram = cleanText(payload.channelNameTelegram);
-  const channelLinkTelegram = normalizeTelegramChannelLink(payload.channelLinkTelegram);
   const image = payload.storeImage;
 
   if (!storeName || storeName.length > 50) {
     return { error: "Do'kon nomi 1-50 ta belgi bo'lishi kerak." };
-  }
-
-  if (channelNameTelegram.length > 100) {
-    return { error: "Telegram kanal nomi 100 ta belgigacha bo'lishi kerak." };
-  }
-
-  if (cleanText(payload.channelLinkTelegram) && !channelLinkTelegram) {
-    return { error: "Public Telegram kanal linkini @kanal yoki https://t.me/kanal formatida yuboring." };
   }
 
   if (image && image.data && !image.type) {
@@ -462,8 +332,6 @@ function validateStoreSettingsPayload(payload) {
   return {
     store: {
       storeName,
-      channelNameTelegram,
-      channelLinkTelegram,
       storeImage: image
     }
   };
@@ -471,7 +339,7 @@ function validateStoreSettingsPayload(payload) {
 
 function imageExtensionForType(type) {
   if (!IMAGE_MIME_EXTENSIONS[type]) {
-    throw Object.assign(new Error("Faqat JPG, PNG, WEBP va GIF rasmlarni yuklash mumkin."), { statusCode: 400 });
+    throw Object.assign(new Error("Faqat JPG, PNG, WEBP va GIF rasmlarni yuklash mumkin."), { expose: true, statusCode: 400 });
   }
   return IMAGE_MIME_EXTENSIONS[type];
 }
@@ -483,7 +351,7 @@ function imageBufferFromData(image) {
   const buffer = Buffer.from(base64, "base64");
 
   if (!buffer.length || buffer.length > 5 * 1024 * 1024) {
-    throw Object.assign(new Error("Har bir rasm 5 MB yoki undan kichik bo'lishi kerak."), { statusCode: 413 });
+    throw Object.assign(new Error("Har bir rasm 5 MB yoki undan kichik bo'lishi kerak."), { expose: true, statusCode: 413 });
   }
 
   return { buffer, extension };
@@ -501,7 +369,7 @@ async function saveImageFile(image) {
 function tempUploadFilePath(tempId) {
   const safeTempId = cleanText(tempId);
   if (!/^[0-9]+-[0-9a-f-]+\.(jpg|png|webp|gif)$/i.test(safeTempId)) {
-    throw Object.assign(new Error("Vaqtinchalik rasm topilmadi."), { statusCode: 400 });
+    throw Object.assign(new Error("Vaqtinchalik rasm topilmadi."), { expose: true, statusCode: 400 });
   }
   return path.join(TEMP_UPLOAD_DIR, safeTempId);
 }
@@ -574,7 +442,6 @@ function validateProductPayload(payload) {
   const inventory = normalizeInventoryRows(payload.inventory);
   const boxQuantity = parseNonNegativeInteger(payload.box_quantity ?? payload.boxQuantity ?? 0);
   const images = normalizeImages(payload.images);
-  const publishToTelegram = payload.publishToTelegram !== false && payload.publish_to_telegram !== false;
 
   if (!artNo) return { error: "Artno kiritilishi kerak." };
   if (!SHOE_TYPES.includes(type)) return { error: "To'g'ri oyoq kiyim turini tanlang." };
@@ -600,7 +467,6 @@ function validateProductPayload(payload) {
       material,
       inventory,
       boxQuantity,
-      publishToTelegram,
       images
     }
   };
@@ -675,37 +541,6 @@ async function replaceProductImages(connection, variantId, images) {
   return savedImages;
 }
 
-async function removeArtNoUniqueIndexes() {
-  const [indexes] = await pool.execute(
-    `SELECT INDEX_NAME AS indexName
-     FROM INFORMATION_SCHEMA.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'products'
-       AND INDEX_NAME <> 'PRIMARY'
-     GROUP BY INDEX_NAME
-     HAVING MAX(NON_UNIQUE) = 0
-        AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) = 'art_no'`
-  );
-
-  for (const index of indexes) {
-    await pool.query(`ALTER TABLE products DROP INDEX \`${index.indexName.replace(/`/g, "``")}\``);
-  }
-}
-
-// New sold-product feature code starts.
-async function tableExists(tableName) {
-  const [rows] = await pool.execute(
-    `SELECT 1
-     FROM INFORMATION_SCHEMA.TABLES
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = ?
-     LIMIT 1`,
-    [tableName]
-  );
-
-  return rows.length > 0;
-}
-
 async function columnExists(tableName, columnName) {
   const [rows] = await pool.execute(
     `SELECT 1
@@ -718,160 +553,6 @@ async function columnExists(tableName, columnName) {
   );
 
   return rows.length > 0;
-}
-
-async function ensureIndex(tableName, indexName, columnName) {
-  const [existing] = await pool.execute(
-    `SELECT 1
-     FROM INFORMATION_SCHEMA.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = ?
-       AND INDEX_NAME = ?
-     LIMIT 1`,
-    [tableName, indexName]
-  );
-
-  if (!existing.length) {
-    await pool.query(`CREATE INDEX \`${indexName}\` ON \`${tableName}\`(\`${columnName}\`)`);
-  }
-}
-
-async function ensureBooleanColumn(tableName, columnName, defaultValue = false) {
-  if (await columnExists(tableName, columnName)) return;
-
-  await pool.query(
-    `ALTER TABLE \`${tableName}\`
-     ADD COLUMN \`${columnName}\` BOOLEAN NOT NULL DEFAULT ${defaultValue ? "TRUE" : "FALSE"}`
-  );
-}
-
-async function ensureSoldProductsTables() {
-  await pool.execute(
-    `CREATE TABLE IF NOT EXISTS sold_products_pair (
-      id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-      store_id INT UNSIGNED NOT NULL,
-      seller_user_id INT UNSIGNED NOT NULL,
-      product_variant_id INT UNSIGNED NOT NULL,
-      size ENUM('33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44') NOT NULL,
-      sold_price DECIMAL(10,2) NOT NULL,
-      landing_price DECIMAL(10,2) NOT NULL,
-      sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      isCanceled BOOLEAN NOT NULL DEFAULT FALSE,
-
-      CONSTRAINT fk_sold_products_pair_store
-        FOREIGN KEY (store_id) REFERENCES store(id)
-        ON UPDATE CASCADE,
-
-      CONSTRAINT fk_sold_products_pair_user
-        FOREIGN KEY (seller_user_id) REFERENCES users(id)
-        ON UPDATE CASCADE,
-
-      CONSTRAINT fk_sold_products_pair_variant
-        FOREIGN KEY (product_variant_id) REFERENCES product_variant(id)
-        ON UPDATE CASCADE,
-
-      CONSTRAINT chk_sold_products_pair_price
-        CHECK (sold_price >= 0)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
-  );
-
-  await pool.execute(
-    `CREATE TABLE IF NOT EXISTS sold_products_box (
-      id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-      store_id INT UNSIGNED NOT NULL,
-      seller_user_id INT UNSIGNED NOT NULL,
-      box_stock_id INT UNSIGNED NOT NULL,
-      quantity INT NOT NULL DEFAULT 1,
-      sold_price DECIMAL(10,2) NOT NULL,
-      landing_price DECIMAL(10,2) NOT NULL,
-      overall_price DECIMAL(10,2) GENERATED ALWAYS AS (sold_price * quantity) STORED,
-      sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      isCancelled BOOLEAN NOT NULL DEFAULT FALSE,
-
-      CONSTRAINT fk_sold_products_box_store
-        FOREIGN KEY (store_id) REFERENCES store(id)
-        ON UPDATE CASCADE,
-
-      CONSTRAINT fk_sold_products_box_user
-        FOREIGN KEY (seller_user_id) REFERENCES users(id)
-        ON UPDATE CASCADE,
-
-      CONSTRAINT fk_sold_products_box_stock
-        FOREIGN KEY (box_stock_id) REFERENCES box_stock(id)
-        ON UPDATE CASCADE,
-
-      CONSTRAINT chk_sold_products_box_quantity
-        CHECK (quantity > 0),
-
-      CONSTRAINT chk_sold_products_box_price
-        CHECK (sold_price >= 0),
-
-      CONSTRAINT chk_sold_products_box_landing_price
-        CHECK (landing_price >= 0)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
-  );
-
-  const pairIndexes = [
-    ["idx_sold_products_pair_store_id", "store_id"],
-    ["idx_sold_products_pair_seller_user_id", "seller_user_id"],
-    ["idx_sold_products_pair_product_variant_id", "product_variant_id"],
-    ["idx_sold_products_pair_sold_at", "sold_at"]
-  ];
-
-  for (const [indexName, columnName] of pairIndexes) {
-    await ensureIndex("sold_products_pair", indexName, columnName);
-  }
-
-  const boxIndexes = [
-    ["idx_sold_products_box_store_id", "store_id"],
-    ["idx_sold_products_box_seller_user_id", "seller_user_id"],
-    ["idx_sold_products_box_box_stock_id", "box_stock_id"],
-    ["idx_sold_products_box_sold_at", "sold_at"]
-  ];
-
-  for (const [indexName, columnName] of boxIndexes) {
-    await ensureIndex("sold_products_box", indexName, columnName);
-  }
-
-  await ensureBooleanColumn("sold_products_pair", "isCancelled", false);
-  await ensureBooleanColumn("sold_products_box", "isCancelled", false);
-  if (!(await columnExists("sold_products_box", "overall_price"))) {
-    await pool.query(
-      `ALTER TABLE sold_products_box
-       ADD COLUMN overall_price DECIMAL(10,2) GENERATED ALWAYS AS (sold_price * quantity) STORED AFTER landing_price`
-    );
-  }
-
-  if (await tableExists("sold_products")) {
-    const legacyLandingPrice = (await columnExists("sold_products", "landing_price"))
-      ? "COALESCE(sp.landing_price, 0.00)"
-      : "0.00";
-
-    await pool.query(
-      `INSERT INTO sold_products_pair
-         (store_id, seller_user_id, product_variant_id, size, sold_price, landing_price, sold_at)
-       SELECT
-         sp.store_id,
-         sp.user_id,
-         sp.product_variant_id,
-         sp.size,
-         sp.sold_price,
-         ${legacyLandingPrice},
-         sp.sold_at
-       FROM sold_products sp
-       WHERE NOT EXISTS (
-         SELECT 1
-         FROM sold_products_pair spp
-         WHERE spp.store_id = sp.store_id
-           AND spp.seller_user_id = sp.user_id
-           AND spp.product_variant_id = sp.product_variant_id
-           AND spp.size = sp.size
-           AND spp.sold_price = sp.sold_price
-           AND spp.landing_price = ${legacyLandingPrice}
-           AND spp.sold_at = sp.sold_at
-       )`
-    );
-  }
 }
 
 function validateSoldProductPayload(payload) {
@@ -945,7 +626,7 @@ function validatePriceUpdatePayload(payload) {
 
 function normalizeSoldProductsDate(value) {
   const date = cleanText(value);
-  if (!date) return new Date().toISOString().slice(0, 10);
+  if (!date) return null;
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "";
 }
 
@@ -962,53 +643,6 @@ async function userIdForSale(connection, request) {
   return createdOwners[0]?.id || request.user?.id;
 }
 // New sold-product feature code ends.
-
-async function ensureStockAdditionTable() {
-  await pool.execute(
-    `CREATE TABLE IF NOT EXISTS stock_additions (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      store_id INT UNSIGNED NOT NULL,
-      user_id INT UNSIGNED NULL,
-      product_variant_id INT UNSIGNED NOT NULL,
-      stock_type ENUM('pair', 'box') NOT NULL,
-      size VARCHAR(20) NULL,
-      size_range VARCHAR(255) NULL,
-      quantity INT NOT NULL,
-      box_stock_id INT UNSIGNED NULL,
-      added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      isCancelled BOOLEAN NOT NULL DEFAULT FALSE,
-
-      INDEX idx_stock_additions_store_added (store_id, added_at),
-      INDEX idx_stock_additions_variant (product_variant_id),
-      INDEX idx_stock_additions_box_stock (box_stock_id),
-
-      CONSTRAINT fk_stock_additions_store
-        FOREIGN KEY (store_id) REFERENCES store(id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
-
-      CONSTRAINT fk_stock_additions_user
-        FOREIGN KEY (user_id) REFERENCES users(id)
-        ON UPDATE CASCADE
-        ON DELETE SET NULL,
-
-      CONSTRAINT fk_stock_additions_variant
-        FOREIGN KEY (product_variant_id) REFERENCES product_variant(id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
-
-      CONSTRAINT fk_stock_additions_box_stock
-        FOREIGN KEY (box_stock_id) REFERENCES box_stock(id)
-        ON UPDATE CASCADE
-        ON DELETE SET NULL,
-
-      CONSTRAINT chk_stock_additions_quantity
-        CHECK (quantity > 0)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
-  );
-
-  await ensureBooleanColumn("stock_additions", "isCancelled", false);
-}
 
 async function getOrCreateLookup(connection, table, idColumn, valueColumn, value) {
   const [existing] = await connection.execute(
@@ -1059,10 +693,7 @@ async function storeForUser(userId) {
        s.id,
        s.store_name AS storeName,
        su.role AS storeRole,
-       s.store_image AS storeImage,
-       s.channel_name_telegram AS channelNameTelegram,
-       s.channel_link_telegram AS channelLinkTelegram,
-       s.channel_id AS channelId
+       s.store_image AS storeImage
      FROM store_users su
      INNER JOIN store s ON s.id = su.store_id
      WHERE su.user_id = ?
@@ -1072,74 +703,6 @@ async function storeForUser(userId) {
     [userId]
   );
   return stores[0] || null;
-}
-
-function verifyTelegramInitData(initData) {
-  if (!telegramBotToken) {
-    throw Object.assign(new Error("TELEGRAM_BOT_TOKEN sozlanmagan."), { statusCode: 500 });
-  }
-
-  const params = new URLSearchParams(String(initData || ""));
-  const receivedHash = params.get("hash");
-  if (!receivedHash) {
-    throw Object.assign(new Error("Telegram initData hash topilmadi."), { statusCode: 401 });
-  }
-
-  params.delete("hash");
-  const dataCheckString = [...params.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("\n");
-
-  const secretKey = crypto.createHmac("sha256", "WebAppData").update(telegramBotToken).digest();
-  const calculatedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
-
-  if (
-    Buffer.byteLength(receivedHash) !== Buffer.byteLength(calculatedHash) ||
-    !crypto.timingSafeEqual(Buffer.from(receivedHash), Buffer.from(calculatedHash))
-  ) {
-    throw Object.assign(new Error("Telegram imzosi noto'g'ri."), { statusCode: 401 });
-  }
-
-  const authDate = Number(params.get("auth_date") || 0);
-  if (!authDate || Math.floor(Date.now() / 1000) - authDate > telegramAuthMaxAgeSeconds) {
-    throw Object.assign(new Error("Telegram sessiyasi eskirgan. Botdan qayta oching."), { statusCode: 401 });
-  }
-
-  let telegramUser = {};
-  try {
-    telegramUser = JSON.parse(params.get("user") || "{}");
-  } catch (_error) {
-    throw Object.assign(new Error("Telegram foydalanuvchi ma'lumoti noto'g'ri."), { statusCode: 401 });
-  }
-  if (!telegramUser.id) {
-    throw Object.assign(new Error("Telegram foydalanuvchi ma'lumoti topilmadi."), { statusCode: 401 });
-  }
-
-  return {
-    id: Number(telegramUser.id),
-    username: cleanText(telegramUser.username),
-    firstName: cleanText(telegramUser.first_name),
-    lastName: cleanText(telegramUser.last_name),
-    photoUrl: cleanText(telegramUser.photo_url)
-  };
-}
-
-async function userForTelegramId(telegramId) {
-  const [users] = await pool.execute(
-    `SELECT
-       id,
-       fname,
-       lname,
-       phone_number AS phoneNumber,
-       role,
-       telegram_id AS telegramId
-     FROM users
-     WHERE telegram_id = ?
-     LIMIT 1`,
-    [telegramId]
-  );
-  return users[0] || null;
 }
 
 async function hydrateAuthenticatedUser(user, response) {
@@ -1166,19 +729,10 @@ async function requireAuth(request, response, next) {
     }
 
     const session = readSession(request);
-    let userId = session?.userId;
+    const userId = session?.userId;
 
     if (!userId) {
-      const initData = request.get("X-Telegram-Init-Data");
-      if (initData) {
-        const telegramUser = verifyTelegramInitData(initData);
-        const telegramAccount = await userForTelegramId(telegramUser.id);
-        userId = telegramAccount?.id;
-      }
-    }
-
-    if (!userId) {
-      apiMessage(response, "Telegram orqali botdan qayta kiring.", 401);
+      apiMessage(response, "Authentication required.", 401);
       return;
     }
 
@@ -1230,19 +784,6 @@ function requireStoreManager(request, response, next) {
 
 function currentStoreId(request) {
   return request.store?.id || defaultStoreId;
-}
-
-async function announceNewProductToChannel(storeId, product) {
-  if (!product) return;
-
-  try {
-    const result = await publishProductToStoreChannel(storeId, product);
-    if (!result.sent && result.reason !== "channel_id_missing") {
-      console.warn(`Product channel announcement skipped: ${result.reason}`);
-    }
-  } catch (error) {
-    console.error(`Product channel announcement failed: ${error.message}`);
-  }
 }
 
 function canViewLandingPrice(request) {
@@ -1307,75 +848,12 @@ async function addInventoryRows(connection, variantId, inventory, storeId) {
   }
 }
 
-async function ensureBoxStockTable() {
-  await pool.execute(
-    `CREATE TABLE IF NOT EXISTS box_stock (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      product_variant_id INT NOT NULL,
-      size_range VARCHAR(255) NOT NULL,
-      quantity INT NOT NULL DEFAULT 0,
-      store_id INT NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-      CONSTRAINT fk_box_stock_variant
-        FOREIGN KEY (product_variant_id) REFERENCES product_variant(id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
-
-      CONSTRAINT fk_box_stock_store
-        FOREIGN KEY (store_id) REFERENCES store(id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
-
-      CONSTRAINT chk_box_stock_quantity
-        CHECK (quantity >= 0)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
-  );
-
-  if (!(await columnExists("box_stock", "store_id"))) {
-    await ensureDefaultStore(pool);
-    await pool.query(`ALTER TABLE box_stock ADD COLUMN store_id INT NULL AFTER quantity`);
-    await pool.query("UPDATE box_stock SET store_id = ? WHERE store_id IS NULL", [defaultStoreId]);
-    await pool.query(`ALTER TABLE box_stock MODIFY store_id INT NOT NULL`);
-  }
-
-  const [storeForeignKeys] = await pool.execute(
-    `SELECT 1
-     FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'box_stock'
-       AND CONSTRAINT_NAME = 'fk_box_stock_store'
-     LIMIT 1`
-  );
-
-  if (!storeForeignKeys.length) {
-    await pool.query(
-      `ALTER TABLE box_stock
-       ADD CONSTRAINT fk_box_stock_store
-         FOREIGN KEY (store_id) REFERENCES store(id)
-         ON UPDATE CASCADE
-         ON DELETE RESTRICT`
-    );
-  }
-
-  const indexes = [
-    ["idx_box_stock_product_variant_id", "product_variant_id"],
-    ["idx_box_stock_store_id", "store_id"],
-    ["idx_box_stock_quantity", "quantity"]
-  ];
-
-  for (const [indexName, columnName] of indexes) {
-    await ensureIndex("box_stock", indexName, columnName);
-  }
-}
-
 async function writeBoxStockRow(connection, variantId, inventory, boxQuantity, storeId) {
   if (boxQuantity <= 0) return;
 
   const sizeRange = normalizeSizeRange(sizeRangeFromInventory(inventory));
   if (!sizeRange) {
-    throw Object.assign(new Error("At least one size quantity is required when adding boxes."), { statusCode: 400 });
+    throw Object.assign(new Error("At least one size quantity is required when adding boxes."), { expose: true, statusCode: 400 });
   }
 
   const [existingBoxes] = await connection.execute(
@@ -1512,7 +990,7 @@ async function findOpenableBoxStock(connection, variantId, size, storeId, lock =
 
 async function openBoxStockInTransaction(connection, boxStock, storeId) {
   if (!boxStock || Number(boxStock.quantity) <= 0) {
-    throw Object.assign(new Error("No unopened boxes are available."), { statusCode: 400 });
+    throw Object.assign(new Error("No unopened boxes are available."), { expose: true, statusCode: 400 });
   }
 
   const inventory = inventoryFromSizeRange(boxStock.sizeRange);
@@ -1550,11 +1028,11 @@ async function openBoxStock(boxStockId, storeId = defaultStoreId) {
     );
 
     if (!boxStock) {
-      throw Object.assign(new Error("Box stock record was not found."), { statusCode: 404 });
+      throw Object.assign(new Error("Box stock record was not found."), { expose: true, statusCode: 404 });
     }
 
     if (Number(boxStock.quantity) <= 0) {
-      throw Object.assign(new Error("No unopened boxes are available."), { statusCode: 400 });
+      throw Object.assign(new Error("No unopened boxes are available."), { expose: true, statusCode: 400 });
     }
 
     const inventory = inventoryFromSizeRange(boxStock.sizeRange);
@@ -1797,22 +1275,41 @@ async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
   };
 }
 
-app.get("/", (_request, response) => {
-  response.redirect(`${frontendUrl}/inventory`);
+route("post", "/api/auth/login", async (request, response, next) => {
+  try {
+    const phoneNumber = validatePhone(request.body?.phoneNumber);
+    const password = typeof request.body?.password === "string" ? request.body.password : "";
+    let user = null;
+    if (phoneNumber && password && password.length <= 1024) {
+      const [users] = await pool.execute(
+        `SELECT id, fname, lname, phone_number AS phoneNumber, password_hash AS passwordHash, role
+         FROM users
+         WHERE phone_number = ?
+         LIMIT 1`,
+        [phoneNumber]
+      );
+      user = users[0] || null;
+    }
+    const valid = await verifyPassword(password, user?.passwordHash || DUMMY_PASSWORD_HASH);
+    if (!user || !valid) {
+      apiMessage(response, "Invalid phone number or password.", 401);
+      return;
+    }
+    delete user.passwordHash;
+    response.json(await hydrateAuthenticatedUser(user, response));
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.get("/inventory", (_request, response) => {
-  response.redirect(`${frontendUrl}/inventory`);
-});
-
-app.get("/api/auth/me", requireAuth, (request, response) => {
+route("get", "/api/auth/me", requireAuth, (request, response) => {
   response.json({
     user: request.user,
     store: request.store
   });
 });
 
-app.get("/api/store", requireAuth, requireStoreOwner, async (request, response, next) => {
+route("get", "/api/store", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
     const store = await storeForUser(request.user.id);
     if (!store) {
@@ -1826,7 +1323,7 @@ app.get("/api/store", requireAuth, requireStoreOwner, async (request, response, 
   }
 });
 
-app.put("/api/store", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("put", "/api/store", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   const validation = validateStoreSettingsPayload(request.body || {});
   if (validation.error) {
     apiMessage(response, validation.error, 400);
@@ -1845,19 +1342,10 @@ app.put("/api/store", requireAuth, requireStoreOwner, requireStoreManager, async
     await pool.execute(
       `UPDATE store
        SET store_name = ?,
-           channel_name_telegram = ?,
-           channel_id = CASE
-             WHEN COALESCE(channel_link_telegram, '') <> ? THEN NULL
-             ELSE channel_id
-           END,
-           channel_link_telegram = ?,
            store_image = COALESCE(NULLIF(?, ''), store_image)
        WHERE id = ?`,
       [
         data.storeName,
-        data.channelNameTelegram || null,
-        data.channelLinkTelegram || "",
-        data.channelLinkTelegram || null,
         storeImagePath,
         storeId
       ]
@@ -1869,45 +1357,21 @@ app.put("/api/store", requireAuth, requireStoreOwner, requireStoreManager, async
   }
 });
 
-app.post("/api/auth/signout", (_request, response) => {
+route("post", "/api/auth/signout", (_request, response) => {
   clearSessionCookie(response);
   response.status(204).end();
 });
 
-app.post("/api/telegram/auth", async (request, response, next) => {
-  try {
-    const telegramUser = verifyTelegramInitData(request.body.initData);
-    const user = await userForTelegramId(telegramUser.id);
-
-    if (!user) {
-      response.status(403).json({
-        registered: false,
-        message: "Avval Telegram bot orqali ro'yxatdan o'ting."
-      });
-      return;
-    }
-
-    const auth = await hydrateAuthenticatedUser(user, response);
-    response.json({ registered: true, ...auth });
-  } catch (error) {
-    if (error.statusCode) {
-      response.status(error.statusCode).json({ message: error.message });
-      return;
-    }
-    next(error);
-  }
-});
-
-app.get("/api/health", async (request, response) => {
+route("get", "/api/health", async (request, response) => {
   try {
     await testConnection();
     response.json({ ok: true });
   } catch (error) {
-    response.status(500).json({ ok: false, message: error.message });
+    response.status(503).json({ ok: false, message: "Database unavailable" });
   }
 });
 
-app.get("/api/meta", requireAuth, requireStoreOwner, async (_request, response, next) => {
+route("get", "/api/meta", requireAuth, requireStoreOwner, async (_request, response, next) => {
   try {
     const [colours] = await pool.execute("SELECT colour_name AS colour FROM colours ORDER BY colour_name");
     const [materials] = await pool.execute("SELECT material_type AS material FROM materials ORDER BY material_type");
@@ -1925,7 +1389,7 @@ app.get("/api/meta", requireAuth, requireStoreOwner, async (_request, response, 
   }
 });
 
-app.post("/api/uploads/temp", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("post", "/api/uploads/temp", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   try {
     const image = normalizeImages([request.body?.image])[0];
     if (!image?.data) {
@@ -1939,7 +1403,7 @@ app.post("/api/uploads/temp", requireAuth, requireStoreOwner, requireStoreManage
   }
 });
 
-app.delete("/api/uploads/temp/:tempId", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("delete", "/api/uploads/temp/:tempId", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   try {
     await deleteTempImageFile(request.params.tempId);
     apiData(response, { deleted: true });
@@ -1949,7 +1413,7 @@ app.delete("/api/uploads/temp/:tempId", requireAuth, requireStoreOwner, requireS
 });
 
 // New sold-product feature code starts.
-app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, response, next) => {
+route("post", "/api/inventory/sold", requireAuth, requireStoreOwner, async (request, response, next) => {
   const validation = validateSoldProductPayload(request.body);
   if (validation.error) {
     apiMessage(response, validation.error, 400);
@@ -2150,13 +1614,14 @@ app.post("/api/inventory/sold", requireAuth, requireStoreOwner, async (request, 
   }
 });
 
-app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, response, next) => {
+route("get", "/api/sold-products", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
-    const saleDate = normalizeSoldProductsDate(request.query.date);
-    if (!saleDate) {
+    const requestedDate = normalizeSoldProductsDate(request.query.date);
+    if (requestedDate === "") {
       apiMessage(response, "To'g'ri sana kiritilishi kerak.", 400);
       return;
     }
+    const saleDate = requestedDate || (await pool.query("SELECT CURRENT_DATE() AS currentDate"))[0][0].currentDate;
 
     const sellerOnly = !canViewLandingPrice(request);
     const storeId = currentStoreId(request);
@@ -2262,7 +1727,7 @@ app.get("/api/sold-products", requireAuth, requireStoreOwner, async (request, re
   }
 });
 
-app.post("/api/sold-products/:id/cancel", requireAuth, requireStoreOwner, async (request, response, next) => {
+route("post", "/api/sold-products/:id/cancel", requireAuth, requireStoreOwner, async (request, response, next) => {
   if (!hasStoreManagerAccess(request)) {
     apiMessage(response, "Sotuvni faqat do'kon egasi yoki menejer bekor qilishi mumkin.", 403);
     return;
@@ -2381,7 +1846,7 @@ app.post("/api/sold-products/:id/cancel", requireAuth, requireStoreOwner, async 
 });
 // New sold-product feature code ends.
 
-app.get("/api/products", requireAuth, requireStoreOwner, async (request, response, next) => {
+route("get", "/api/products", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
     const storeId = currentStoreId(request);
     const [rows] = await pool.execute(
@@ -2406,7 +1871,7 @@ app.get("/api/products", requireAuth, requireStoreOwner, async (request, respons
   }
 });
 
-app.get("/api/products/match", requireAuth, requireStoreOwner, async (request, response, next) => {
+route("get", "/api/products/match", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
     const artNo = cleanText(request.query.artNo);
     const colour = cleanText(request.query.colour);
@@ -2430,7 +1895,7 @@ app.get("/api/products/match", requireAuth, requireStoreOwner, async (request, r
   }
 });
 
-app.get("/api/products/lookup", requireAuth, requireStoreOwner, async (request, response, next) => {
+route("get", "/api/products/lookup", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
     const artNo = cleanText(request.query.artNo);
 
@@ -2449,7 +1914,7 @@ app.get("/api/products/lookup", requireAuth, requireStoreOwner, async (request, 
   }
 });
 
-app.post("/api/products/prices", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("post", "/api/products/prices", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   const validation = validatePriceUpdatePayload(request.body);
   if (validation.error) {
     apiMessage(response, validation.error, 400);
@@ -2505,7 +1970,7 @@ app.post("/api/products/prices", requireAuth, requireStoreOwner, requireStoreMan
   }
 });
 
-app.post("/api/box-stock/:id/open", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("post", "/api/box-stock/:id/open", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   const boxStockId = Number(request.params.id);
 
   if (!Number.isSafeInteger(boxStockId) || boxStockId <= 0) {
@@ -2527,7 +1992,7 @@ app.post("/api/box-stock/:id/open", requireAuth, requireStoreOwner, requireStore
   }
 });
 
-app.put("/api/products/:id/pair-inventory", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("put", "/api/products/:id/pair-inventory", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   const productId = Number(request.params.id);
   const variantId = Number(request.body?.variantId || 0);
   const inventory = normalizeInventoryRows(request.body?.inventory);
@@ -2563,7 +2028,7 @@ app.put("/api/products/:id/pair-inventory", requireAuth, requireStoreOwner, requ
   }
 });
 
-app.put("/api/products/:id/box-stock", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("put", "/api/products/:id/box-stock", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   const productId = Number(request.params.id);
   const variantId = Number(request.body?.variantId || 0);
   const boxes = Array.isArray(request.body?.boxes) ? request.body.boxes : [];
@@ -2651,7 +2116,7 @@ app.put("/api/products/:id/box-stock", requireAuth, requireStoreOwner, requireSt
   }
 });
 
-app.post("/api/stock-additions/:id/cancel", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("post", "/api/stock-additions/:id/cancel", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   const additionId = Number(request.params.id);
   const storeId = currentStoreId(request);
   const connection = await pool.getConnection();
@@ -2757,7 +2222,7 @@ app.post("/api/stock-additions/:id/cancel", requireAuth, requireStoreOwner, requ
   }
 });
 
-app.get("/api/products/:id", requireAuth, requireStoreOwner, async (request, response, next) => {
+route("get", "/api/products/:id", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
     const product = await fetchProduct(request.params.id, currentStoreId(request));
     if (!product) {
@@ -2770,7 +2235,7 @@ app.get("/api/products/:id", requireAuth, requireStoreOwner, async (request, res
   }
 });
 
-app.post("/api/products", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("post", "/api/products", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   const validation = validateProductPayload(request.body);
   if (validation.error) {
     apiMessage(response, validation.error, 400);
@@ -2803,10 +2268,6 @@ app.post("/api/products", requireAuth, requireStoreOwner, requireStoreManager, a
       await connection.commit();
 
       const updatedProduct = await fetchProduct(existing.productId, storeId, existing.variantId);
-      if (data.publishToTelegram) {
-        await announceNewProductToChannel(storeId, updatedProduct);
-      }
-
       apiData(response, {
         ...updatedProduct,
         inventoryIncremented: true
@@ -2834,9 +2295,6 @@ app.post("/api/products", requireAuth, requireStoreOwner, requireStoreManager, a
       await connection.commit();
 
       const createdProduct = await fetchProduct(existingProduct.productId, storeId, variantInsert.insertId);
-      if (data.publishToTelegram) {
-        await announceNewProductToChannel(storeId, createdProduct);
-      }
       apiData(response, createdProduct, 201);
       return;
     }
@@ -2859,9 +2317,6 @@ app.post("/api/products", requireAuth, requireStoreOwner, requireStoreManager, a
     await connection.commit();
 
     const createdProduct = await fetchProduct(productInsert.insertId, storeId, variantInsert.insertId);
-    if (data.publishToTelegram) {
-      await announceNewProductToChannel(storeId, createdProduct);
-    }
     apiData(response, createdProduct, 201);
   } catch (error) {
     await connection.rollback();
@@ -2871,7 +2326,7 @@ app.post("/api/products", requireAuth, requireStoreOwner, requireStoreManager, a
   }
 });
 
-app.put("/api/products/:id", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("put", "/api/products/:id", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   const validation = validateProductPayload(request.body);
   if (validation.error) {
     apiMessage(response, validation.error, 400);
@@ -2926,7 +2381,7 @@ app.put("/api/products/:id", requireAuth, requireStoreOwner, requireStoreManager
   }
 });
 
-app.delete("/api/products/:id", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("delete", "/api/products/:id", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
   const productId = Number(request.params.id);
   const connection = await pool.getConnection();
 
@@ -2961,59 +2416,29 @@ app.delete("/api/products/:id", requireAuth, requireStoreOwner, requireStoreMana
   }
 });
 
-app.use((error, _request, response, _next) => {
-  console.error(error);
-  const statusCode = error.statusCode || (error.type === "entity.too.large" ? 413 : 500);
-  response.status(statusCode).json({
-    success: false,
-    error: readableDatabaseError(error),
-    message: readableDatabaseError(error),
-    detail: error.message
-  });
+app.use((request, response) => {
+  response.status(404).json({ success: false, error: "Not found.", message: "Not found." });
 });
 
-function readableDatabaseError(error) {
-  if (error.statusCode && error.message) {
-    return error.message;
-  }
+app.use(require("./src/http/errors").createErrorHandler({ logger }));
 
-  if (error.type === "entity.too.large") {
-    return "Yuklangan rasmlar juda katta. Rasmlarni bittalab yuklang yoki hajmini kamaytiring.";
-  }
-
-  if (error.code === "ER_DUP_ENTRY") {
-    return "Bu qiymat allaqachon mavjud. Artno takrorlanishi mumkin, lekin bazada eski unique index qolgan bo'lishi mumkin.";
-  }
-
-  if (error.code === "ER_NO_REFERENCED_ROW_2" && String(error.message).includes("fk_inventory_store")) {
-    return "Ombor uchun to'g'ri do'kon kerak. Ilova DEFAULT_STORE_ID ni topa yoki yarata olmadi.";
-  }
-
-  if (error.code === "ER_TRUNCATED_WRONG_VALUE_FOR_FIELD" || error.code === "WARN_DATA_TRUNCATED") {
-    return "Maydonlardan biri baza turi yoki enum qiymatiga mos emas.";
-  }
-
-  return "Server xatosi. Baza ulanishi va jadval tuzilishini tekshiring.";
+app.locals.cleanupUploads = cleanupStaleTempUploads;
+return app;
 }
 
-app.listen(port, host, async () => {
-  try {
-    await testConnection();
-    await ensureStoreTelegramColumns(pool);
-    await removeArtNoUniqueIndexes();
-    await ensureBoxStockTable();
-    await ensureSoldProductsTables();
-    await ensureStockAdditionTable();
-    await cleanupStaleTempUploads();
-    setInterval(() => {
-      cleanupStaleTempUploads().catch((error) => {
-        console.error(`Temporary upload cleanup failed: ${error.message}`);
-      });
-    }, 60 * 60 * 1000).unref();
-    console.log(`Inventory app running at http://localhost:${port}`);
-    console.log(`Phone access is available on this computer's network IP at port ${port}.`);
-  } catch (error) {
-    console.log(`Inventory app running at http://localhost:${port}`);
-    console.error(`Database connection failed: ${error.message}`);
-  }
-});
+module.exports = { createApp };
+
+if (require.main === module) {
+  require("dotenv").config();
+  const { readConfig } = require("./src/config");
+  const { pool } = require("./src/db");
+  const { startServer } = require("./src/runtime");
+  const uploads = { rootDir: path.join(__dirname, "public", "uploads"), tempDir: path.join(__dirname, "public", "uploads", "temp") };
+  startServer({ createApp, pool, config: readConfig(process.env), uploads,
+    checkSchema: require("./src/db/schema-inspection").assertSchemaReady,
+    prepareUploads: async () => { await fs.promises.mkdir(uploads.tempDir, { recursive: true }); }
+  }).then(({server, close}) => {
+    console.log("Inventory app listening on port " + server.address().port);
+    for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => close().then(() => process.exit(0)).catch(() => process.exit(1)));
+  }).catch(() => { console.error("Backend startup failed; check database and configuration."); process.exitCode = 1; });
+}
