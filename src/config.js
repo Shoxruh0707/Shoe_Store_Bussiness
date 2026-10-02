@@ -1,6 +1,14 @@
 function readConfig(env = {}) {
   const config = { ...env, API_AUTH_REQUIRED: env.API_AUTH_REQUIRED || 'true' };
   if (!['true', 'false'].includes(config.API_AUTH_REQUIRED)) throw new Error('Invalid API_AUTH_REQUIRED');
+  config.SWAGGER_ENABLED = env.SWAGGER_ENABLED || 'false';
+  if (!['true', 'false'].includes(config.SWAGGER_ENABLED)) throw new Error('Invalid SWAGGER_ENABLED');
+  if (config.SWAGGER_ENABLED === 'true') {
+    if (!String(env.SWAGGER_USERNAME || '').trim() || String(env.SWAGGER_USERNAME).includes(':')) {
+      throw new Error('SWAGGER_USERNAME must be nonempty and cannot contain a colon');
+    }
+    if (!String(env.SWAGGER_PASSWORD || '').trim()) throw new Error('SWAGGER_PASSWORD is required when Swagger is enabled');
+  }
   if (env.NODE_ENV === 'production') {
     if (config.API_AUTH_REQUIRED !== 'true') throw new Error('API_AUTH_REQUIRED must be true in production');
     const secret = String(env.SESSION_SECRET || '');

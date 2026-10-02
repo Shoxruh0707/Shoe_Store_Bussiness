@@ -8,7 +8,7 @@
     "dev": "node --watch server.js",
     "stack:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-stack.ps1",
     "stack:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-stack.ps1 -Restart",
-    "test": "node --test test/unit/app-lifecycle.test.js test/unit/config.test.js test/unit/http-errors.test.js test/unit/legacy-session.test.js test/unit/migration-runner.test.js test/unit/password-auth.test.js test/unit/test-database-config.test.js",
+    "test": "node --test test/unit/app-lifecycle.test.js test/unit/config.test.js test/unit/http-errors.test.js test/unit/legacy-session.test.js test/unit/migration-runner.test.js test/unit/password-auth.test.js test/unit/test-database-config.test.js test/unit/swagger.test.js",
     "test:integration": "node --test test/integration/contracts.test.js test/integration/inventory.test.js test/integration/migration-runner.test.js test/integration/schema-upgrade.test.js test/integration/store-authorization.test.js",
     "db:status": "node scripts/migrate.js status",
     "db:migrate": "node scripts/migrate.js apply"
@@ -17,6 +17,7 @@
     "bcryptjs": "^3.0.2",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "mysql2": "^3.12.0"
+    "mysql2": "^3.12.0",
+    "swagger-ui-express": "5.0.1"
   }
 }

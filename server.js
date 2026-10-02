@@ -84,6 +84,7 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
 
 app.use(express.json({ limit: "25mb" }));
+require("./src/docs/swagger").mountSwagger(app, env);
 app.use("/uploads", express.static(UPLOAD_DIR));
 
 app.use((request, response, next) => {

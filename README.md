@@ -47,6 +47,34 @@ Production requires authentication, a minimum 32-byte non-placeholder `SESSION_S
 
 ## API surface
 
+### Swagger / interactive API documentation
+
+Set these values in `.env`, then restart the backend (`npm.cmd start` locally,
+or recreate the backend with Docker Compose):
+
+```dotenv
+SWAGGER_ENABLED=true
+SWAGGER_USERNAME=your-docs-username
+SWAGGER_PASSWORD=your-docs-password
+```
+
+Open [Swagger UI](http://127.0.0.1:3000/api/docs/) and enter those credentials
+in the browser's login prompt. The same credentials protect `/api/openapi.json`
+and the Swagger UI assets. They grant documentation access only.
+
+To test protected endpoints, expand `POST /api/auth/login`, click **Try it out**,
+enter an existing application's `phoneNumber` and `password`, and click **Execute**.
+Then execute `GET /api/auth/me` or another endpoint. Swagger runs on the API's
+origin, so the browser automatically sends the HTTP-only session cookie; no
+manual cookie entry in **Authorize** is needed. Store permissions still apply.
+Use `POST /api/auth/signout` to end the application session.
+
+Swagger is disabled by default. Enabling it without both documentation credentials
+fails startup. Credentials stay on the server and are not embedded in the spec or UI.
+In production use the HTTPS domain's `/api/docs/` URL. Docker Compose forwards the
+same settings, and the existing Caddy `/api/*` proxy includes the documentation.
+**Try it out executes real requests against the connected database.**
+
 All application operations use `/api`; unknown routes return JSON 404 responses.
 
 - `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/signout`
