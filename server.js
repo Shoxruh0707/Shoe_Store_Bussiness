@@ -1276,6 +1276,43 @@ async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
   };
 }
 
+route("post", "/api/auth/signup", async (request, response, next) => {
+  const payload = request.body || {};
+  const fname = typeof payload.fname === "string" ? payload.fname.trim() : "";
+  const lname = typeof payload.lname === "string" ? payload.lname.trim() : "";
+  const storeName = typeof payload.storeName === "string" ? payload.storeName.trim() : "";
+  const phoneNumber = typeof payload.phoneNumber === "string" ? payload.phoneNumber.trim() : "";
+  const password = typeof payload.password === "string" ? payload.password : "";
+  if (!fname || fname.length > 20 || !lname || lname.length > 20 || !storeName || storeName.length > 50 ||
+      !/^\+[1-9][0-9]{6,13}$/.test(phoneNumber) || password.length < 8 || Buffer.byteLength(password, "utf8") > 72) {
+    return apiMessage(response, "Provide first and last names (1-20 characters), storeName (1-50 characters), an international phoneNumber (+ followed by 7-14 digits), and a password of at least 8 characters and at most 72 UTF-8 bytes.", 400);
+  }
+  const passwordHash = await require("bcryptjs").hash(password, 12);
+  const connection = await pool.getConnection();
+  let user;
+  let store;
+  try {
+    await connection.beginTransaction();
+    const [createdUser] = await connection.execute(
+      "INSERT INTO users (fname, lname, phone_number, password_hash, role) VALUES (?, ?, ?, ?, 'seller')",
+      [fname, lname, phoneNumber, passwordHash]
+    );
+    const [createdStore] = await connection.execute("INSERT INTO store (store_name, is_active) VALUES (?, TRUE)", [storeName]);
+    await connection.execute("INSERT INTO store_users (user_id, store_id, role) VALUES (?, ?, 'owner')", [createdUser.insertId, createdStore.insertId]);
+    await connection.commit();
+    user = { id: createdUser.insertId, fname, lname, phoneNumber, role: "seller" };
+    store = { id: createdStore.insertId, storeName, storeRole: "owner", storeImage: null };
+  } catch (error) {
+    await connection.rollback();
+    if (error.code === "ER_DUP_ENTRY") return apiMessage(response, "An account with this phone number already exists.", 409);
+    return next(error);
+  } finally {
+    connection.release();
+  }
+  setSessionCookie(response, user);
+  response.status(201).json({ user, store });
+});
+
 route("post", "/api/auth/login", async (request, response, next) => {
   try {
     const phoneNumber = validatePhone(request.body?.phoneNumber);

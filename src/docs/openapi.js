@@ -63,6 +63,15 @@ function add(method, path, operationId, tag, summary, options = {}) {
   paths[path][method] = { operationId, tags: [tag], summary, ...(isPublic ? { security: [] } : {}), responses, ...details };
 }
 
+add('post', '/api/auth/signup', 'signup', 'Authentication', 'Create an account and your own store', {
+  public: true, status: 201, schema: ref('Session'),
+  description: 'Creates a seller account with owner membership in a new store and signs you in immediately. No existing API session is required. Passwords must contain at least 8 characters and at most 72 UTF-8 bytes. Clients cannot choose roles or an existing store. Phone numbers must use + followed by 7-14 digits without spaces.',
+  requestBody: body(object({ fname: { type: 'string', minLength: 1, maxLength: 20 }, lname: { type: 'string', minLength: 1, maxLength: 20 }, phoneNumber: { type: 'string', pattern: '^\\+[1-9][0-9]{6,13}$', maxLength: 15 }, password: { type: 'string', format: 'password', minLength: 8, maxLength: 72 }, storeName: { type: 'string', minLength: 1, maxLength: 50 } }, ['fname', 'lname', 'phoneNumber', 'password', 'storeName']),
+    { fname: 'Shoxruh', lname: 'Owner', phoneNumber: '+998901234567', password: 'choose-a-strong-password', storeName: 'My shoe store' }),
+});
+paths['/api/auth/signup'].post.responses[409] = response(ref('Error'), 'Phone number already registered');
+paths['/api/auth/signup'].post.responses[201].headers = { 'Set-Cookie': { description: 'HTTP-only session cookie managed by the browser.', schema: string } };
+
 add('post', '/api/auth/login', 'login', 'Authentication', 'Sign in with an existing account', {
   public: true, schema: ref('Session'),
   description: 'Execute this first. The browser stores the HTTP-only session cookie and sends it on subsequent Try it out requests. Use your application phone number and password, not the Swagger page credentials.',
@@ -147,7 +156,7 @@ module.exports = {
   openapi: '3.0.3',
   info: {
     title: 'Admin Shoe Store API', version: '1.0.0',
-    description: 'Swagger page access uses the credentials configured in .env. To test protected API endpoints, expand POST /api/auth/login, choose Try it out, and execute with an existing application account. Then try GET /api/auth/me. The browser sends the session cookie automatically on this same origin; do not paste cookies into Authorize. POST /api/auth/signout ends the API session. Inventory mutations affect the connected database.',
+    description: 'Swagger page access uses the credentials configured in .env. New users: execute POST /api/auth/signup to create your account and store and sign in. Existing users: execute POST /api/auth/login with your application account. Then try GET /api/auth/me. The browser sends the session cookie automatically on this same origin; do not paste cookies into Authorize. POST /api/auth/signout ends the API session. Inventory mutations affect the connected database.',
   },
   servers: [{ url: '/' }],
   tags: ['Authentication', 'System', 'Store', 'Products', 'Inventory', 'Sales', 'Uploads'].map(name => ({ name })),

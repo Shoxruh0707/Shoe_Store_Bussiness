@@ -35,6 +35,24 @@ The API listens on `http://127.0.0.1:3000` by default. `GET /api/health` checks 
 
 ## Authentication
 
+`POST /api/auth/signup` creates an account and a new store, with owner membership:
+
+```json
+{"fname":"Shoxruh","lname":"Owner","phoneNumber":"+998901234567","password":"choose-a-strong-password","storeName":"My shoe store"}
+```
+
+No existing session is required. Names must be 1-20 characters, store names 1-50,
+and phone numbers must use `+` followed by 7-14 digits (no spaces). Passwords must
+be at least 8 characters and at most 72 UTF-8 bytes. A successful signup returns
+`201` with `{user, store}` and signs you in using the same HTTP-only cookie as login.
+Duplicate phone numbers return `409`; invalid input returns `400`. Registration
+creates a seller with owner access to their own new store, never a global admin.
+The three database inserts are transactional and require no new schema migration.
+
+In Swagger, execute signup first, then `GET /api/auth/me` or inventory endpoints.
+For subsequent sessions use login below. Deploy this change by updating the server
+checkout and running `docker compose up -d --build --no-deps backend`.
+
 `POST /api/auth/login` accepts JSON:
 
 ```json
@@ -77,7 +95,7 @@ same settings, and the existing Caddy `/api/*` proxy includes the documentation.
 
 All application operations use `/api`; unknown routes return JSON 404 responses.
 
-- `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/signout`
+- `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/signout`
 - `GET /api/health`, `GET /api/meta`
 - `GET|PUT /api/store`
 - `GET|POST /api/products`
