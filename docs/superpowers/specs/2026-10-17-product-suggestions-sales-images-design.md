@@ -58,7 +58,7 @@ The pair and box branches remain one `UNION ALL` query. Both branches:
 - return the required product, variant, quantity, pricing, seller, and timestamp fields;
 - identify the numeric sale ID separately so final ordering is `soldAt DESC, saleId DESC` without lexicographic ID errors.
 
-The public `id` stays compatible as `pair-<id>` or `box-<id>`. `viewer.canViewLandingPrice` uses the existing admin/owner/manager permission. Staff receive `landingPrice: null` consistently. Pair landed cost remains the stored per-pair cost. Box sale `soldPrice` remains total box revenue, and stored `landingPrice` remains the total landed cost used for that sale: landed cost per box multiplied by sold quantity. Cancelled records remain visible but are excluded from any future server-calculated active totals; this response currently has no totals to change.
+The public `id` stays compatible as `pair-<id>` or `box-<id>`. `viewer.canViewLandingPrice` uses the existing admin/owner/manager permission. Staff receive `landingPrice: null` consistently. Pair landed cost remains the stored per-pair cost. Box sale `soldPrice` remains total box revenue. Because `sold_products_box.landing_price` stores landed cost per box, the response calculates total box landed cost as `landing_price * quantity`. Cancelled records remain visible but are excluded from any future server-calculated active totals; this response currently has no totals to change.
 
 ## Image Write Semantics
 
