@@ -28,7 +28,8 @@ test('canonical migration resumes after a real partially committed bootstrap',()
  await assert.rejects(assertSchemaReady(pool),{code:'SCHEMA_MIGRATION_REQUIRED'});
  const [tables]=await c.query('SHOW TABLES');assert.equal(tables.length,4);
  await runMigrations({connection:c,migrations,mode:'apply'});await assertSchemaReady(pool);
- const [[count]]=await c.query('SELECT COUNT(*) AS n FROM schema_migrations');assert.equal(count.n,1);
+ const [applied]=await c.query('SELECT id FROM schema_migrations ORDER BY id');
+ assert.deepEqual(applied,[{id:'0001-current-inventory'},{id:'0002-product-search-image-order'}]);
  }finally{c.release();}
 }));
 test('ambiguous box ownership stops before touching existing rows',()=>withTestDatabase(async({pool})=>{
