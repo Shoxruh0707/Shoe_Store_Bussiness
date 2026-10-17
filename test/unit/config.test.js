@@ -15,3 +15,8 @@ test('config does not read ambient env and errors do not reveal values',()=>{
  assert.throws(()=>readConfig({...valid,SESSION_SECRET:'secret-should-not-leak'}),e=>!e.message.includes('secret-should-not-leak'));
  assert.equal(readConfig({API_AUTH_REQUIRED:'false'}).API_AUTH_REQUIRED,'false');
 });
+test('config defaults and validates the application timezone',()=>{
+ assert.equal(readConfig({}).APP_TIMEZONE,'Asia/Tashkent');
+ assert.equal(readConfig({APP_TIMEZONE:'Europe/London'}).APP_TIMEZONE,'Europe/London');
+ for(const value of ['', 'Not/A_Zone', 'UTC+5'])assert.throws(()=>readConfig({APP_TIMEZONE:value}),/Invalid APP_TIMEZONE/);
+});

@@ -1,5 +1,7 @@
 function readConfig(env = {}) {
   const config = { ...env, API_AUTH_REQUIRED: env.API_AUTH_REQUIRED || 'true' };
+  config.APP_TIMEZONE = env.APP_TIMEZONE === undefined ? 'Asia/Tashkent' : String(env.APP_TIMEZONE).trim();
+  if (!require('./local-date').isValidTimeZone(config.APP_TIMEZONE)) throw new Error('Invalid APP_TIMEZONE');
   if (!['true', 'false'].includes(config.API_AUTH_REQUIRED)) throw new Error('Invalid API_AUTH_REQUIRED');
   config.SWAGGER_ENABLED = env.SWAGGER_ENABLED || 'false';
   if (!['true', 'false'].includes(config.SWAGGER_ENABLED)) throw new Error('Invalid SWAGGER_ENABLED');

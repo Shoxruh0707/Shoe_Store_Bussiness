@@ -2,6 +2,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
+const { resolveLocalDateRange } = require("./src/local-date");
 
 
 
@@ -24,6 +25,7 @@ const defaultOwnerPhone = env.DEFAULT_OWNER_PHONE || "+998000000001";
 const defaultPasswordHash =
   env.DEFAULT_OWNER_PASSWORD_HASH || "$2b$10$0000000000000000000000000000000000000000000000000000";
 const sessionSecret = env.SESSION_SECRET || "change-this-session-secret";
+const appTimeZone = env.APP_TIMEZONE || "Asia/Tashkent";
 const apiAuthRequired = env.API_AUTH_REQUIRED !== "false";
 const domain = cleanDomain(env.DOMAIN || "");
 const publicUrl = normalizeUrl(env.PUBLIC_URL || (domain ? `https://${domain}` : ""));
@@ -623,12 +625,6 @@ function validatePriceUpdatePayload(payload) {
       sellingPrice
     }
   };
-}
-
-function normalizeSoldProductsDate(value) {
-  const date = cleanText(value);
-  if (!date) return null;
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "";
 }
 
 async function userIdForSale(connection, request) {
@@ -1654,12 +1650,12 @@ route("post", "/api/inventory/sold", requireAuth, requireStoreOwner, async (requ
 
 route("get", "/api/sold-products", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
-    const requestedDate = normalizeSoldProductsDate(request.query.date);
-    if (requestedDate === "") {
+    const dateRange = resolveLocalDateRange(request.query.date, appTimeZone, clock());
+    if (!dateRange) {
       apiMessage(response, "To'g'ri sana kiritilishi kerak.", 400);
       return;
     }
-    const saleDate = requestedDate || (await pool.query("SELECT CURRENT_DATE() AS currentDate"))[0][0].currentDate;
+    const saleDate = dateRange.date;
 
     const sellerOnly = !canViewLandingPrice(request);
     const storeId = currentStoreId(request);
@@ -1667,12 +1663,13 @@ route("get", "/api/sold-products", requireAuth, requireStoreOwner, async (reques
       ? "spb.overall_price"
       : "(spb.sold_price * spb.quantity)";
     const queryParams = sellerOnly
-      ? [storeId, saleDate, saleDate, request.user.id, storeId, saleDate, saleDate, request.user.id]
-      : [storeId, saleDate, saleDate, storeId, saleDate, saleDate];
+      ? [storeId, dateRange.start, dateRange.end, request.user.id, storeId, dateRange.start, dateRange.end, request.user.id]
+      : [storeId, dateRange.start, dateRange.end, storeId, dateRange.start, dateRange.end];
     const [rows] = await pool.execute(
       `SELECT *
        FROM (
          SELECT
+           spp.id AS saleId,
            CONCAT('pair-', spp.id) AS id,
            'pair' AS saleType,
            spp.size,
@@ -1686,12 +1683,12 @@ route("get", "/api/sold-products", requireAuth, requireStoreOwner, async (reques
            st.type,
            c.colour_name AS colour,
            m.material_type AS material,
-           CONCAT(u.fname, ' ', u.lname) AS soldBy,
+           COALESCE(NULLIF(TRIM(CONCAT_WS(' ', u.fname, u.lname)), ''), 'Unknown user') AS soldBy,
            (
              SELECT pi.image_path
              FROM product_images pi
              WHERE pi.product_variant_id = pv.id
-             ORDER BY pi.id
+             ORDER BY pi.sort_order, pi.id
              LIMIT 1
            ) AS imagePath
          FROM sold_products_pair spp
@@ -1703,18 +1700,19 @@ route("get", "/api/sold-products", requireAuth, requireStoreOwner, async (reques
          LEFT JOIN users u ON u.id = spp.seller_user_id
          WHERE spp.store_id = ?
            AND spp.sold_at >= ?
-           AND spp.sold_at < DATE_ADD(?, INTERVAL 1 DAY)
+           AND spp.sold_at < ?
            ${sellerOnly ? "AND spp.seller_user_id = ?" : ""}
 
          UNION ALL
 
          SELECT
+           spb.id AS saleId,
            CONCAT('box-', spb.id) AS id,
            'box' AS saleType,
            bs.size_range AS size,
            spb.quantity,
            ${boxSoldPriceExpression} AS soldPrice,
-           spb.landing_price AS landingPrice,
+           (spb.landing_price * spb.quantity) AS landingPrice,
            spb.sold_at AS soldAt,
            spb.isCancelled AS isCancelled,
            p.art_no AS artNo,
@@ -1722,12 +1720,12 @@ route("get", "/api/sold-products", requireAuth, requireStoreOwner, async (reques
            st.type,
            c.colour_name AS colour,
            m.material_type AS material,
-           CONCAT(u.fname, ' ', u.lname) AS soldBy,
+           COALESCE(NULLIF(TRIM(CONCAT_WS(' ', u.fname, u.lname)), ''), 'Unknown user') AS soldBy,
            (
              SELECT pi.image_path
              FROM product_images pi
              WHERE pi.product_variant_id = pv.id
-             ORDER BY pi.id
+             ORDER BY pi.sort_order, pi.id
              LIMIT 1
            ) AS imagePath
          FROM sold_products_box spb
@@ -1740,10 +1738,10 @@ route("get", "/api/sold-products", requireAuth, requireStoreOwner, async (reques
          LEFT JOIN users u ON u.id = spb.seller_user_id
          WHERE spb.store_id = ?
            AND spb.sold_at >= ?
-           AND spb.sold_at < DATE_ADD(?, INTERVAL 1 DAY)
+           AND spb.sold_at < ?
            ${sellerOnly ? "AND spb.seller_user_id = ?" : ""}
        ) sales
-       ORDER BY soldAt DESC, id DESC`,
+       ORDER BY soldAt DESC, saleId DESC`,
       queryParams
     );
 
@@ -1752,13 +1750,22 @@ route("get", "/api/sold-products", requireAuth, requireStoreOwner, async (reques
       viewer: {
         canViewLandingPrice: canViewLandingPrice(request)
       },
-      items: rows.map((row) => ({
-        ...row,
-        quantity: Number(row.quantity || 0),
-        soldPrice: Number(row.soldPrice || 0),
-        landingPrice: canViewLandingPrice(request) ? Number(row.landingPrice || 0) : null,
-        isCancelled: Boolean(row.isCancelled)
-      }))
+      items: rows.map((row) => {
+        const { saleId, ...item } = row;
+        const quantity = Number(row.quantity || 0);
+        const soldPrice = Number(row.soldPrice || 0);
+        const landingPrice = Number(row.landingPrice || 0);
+        if (![quantity, soldPrice, landingPrice].every(Number.isSafeInteger)) {
+          throw new Error("Sale contains a non-whole or unsafe monetary value.");
+        }
+        return {
+          ...item,
+          quantity,
+          soldPrice,
+          landingPrice: canViewLandingPrice(request) ? landingPrice : null,
+          isCancelled: Boolean(row.isCancelled)
+        };
+      })
     });
   } catch (error) {
     next(error);
