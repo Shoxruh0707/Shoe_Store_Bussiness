@@ -112,6 +112,10 @@ function cleanText(value) {
   return String(value).trim();
 }
 
+function escapeLikeText(value) {
+  return String(value).replace(/[!%_]/g, "!$&");
+}
+
 const sessionCodec = require("./src/auth/legacy-session").createLegacySessionCodec({ secret: sessionSecret, clock });
 const { verifyPassword } = require("./src/auth/password");
 const DUMMY_PASSWORD_HASH = "$2b$10$esc2kYYKPeZ1pFrXx9PESOCMk9zq.y2swfX5DqxMmz0e0tHuF.hdG";
@@ -2264,6 +2268,98 @@ route("post", "/api/stock-additions/:id/cancel", requireAuth, requireStoreOwner,
     next(error);
   } finally {
     connection.release();
+  }
+});
+
+route("get", "/api/products/suggestions", requireAuth, requireStoreOwner, async (request, response, next) => {
+  try {
+    const q = cleanText(request.query.q);
+    const limitText = request.query.limit;
+    if (!q || Array.from(q).length > 100) {
+      apiMessage(response, "Qidiruv matni 1-100 ta belgi bo'lishi kerak.", 400);
+      return;
+    }
+    if (limitText !== undefined && !/^(?:[1-9]|1\d|20)$/.test(String(limitText))) {
+      apiMessage(response, "Limit 1 dan 20 gacha bo'lgan butun son bo'lishi kerak.", 400);
+      return;
+    }
+
+    const limit = limitText === undefined ? 6 : Number(limitText);
+    const escaped = escapeLikeText(q);
+    const substring = `%${escaped}%`;
+    const prefix = `${escaped}%`;
+    const storeId = currentStoreId(request);
+    const [rows] = await pool.execute(
+      `SELECT
+         p.id,
+         pv.id AS variantId,
+         p.art_no AS artNo,
+         p.name,
+         st.type,
+         (
+           SELECT GROUP_CONCAT(ps.season ORDER BY ps.season SEPARATOR ',')
+           FROM product_seasons ps
+           WHERE ps.product_id = p.id
+         ) AS seasonValues,
+         c.colour_name AS colour,
+         m.material_type AS material,
+         pv.price,
+         pv.landing_price AS landingPrice,
+         (
+           SELECT pi.image_path
+           FROM product_images pi
+           WHERE pi.product_variant_id = pv.id
+           ORDER BY pi.sort_order, pi.id
+           LIMIT 1
+         ) AS primaryImagePath
+       FROM product_variant pv
+       INNER JOIN products p ON p.id = pv.product_id
+       LEFT JOIN shoe_type st ON st.id = p.type_id
+       INNER JOIN colours c ON c.id = pv.colour_id
+       INNER JOIN materials m ON m.id = pv.material_id
+       WHERE pv.store_id = ?
+         AND (
+           p.art_no LIKE ? ESCAPE '!'
+           OR p.name LIKE ? ESCAPE '!'
+           OR c.colour_name LIKE ? ESCAPE '!'
+           OR m.material_type LIKE ? ESCAPE '!'
+         )
+       ORDER BY
+         CASE
+           WHEN p.art_no = ? THEN 0
+           WHEN p.art_no LIKE ? ESCAPE '!' THEN 1
+           ELSE 2
+         END,
+         pv.id
+       LIMIT ?`,
+      [storeId, substring, substring, substring, substring, q, prefix, limit]
+    );
+
+    const canSeeCost = canViewLandingPrice(request);
+    apiData(response, {
+      items: rows.map((row) => {
+        const price = Number(row.price);
+        const landingPrice = Number(row.landingPrice);
+        if (!Number.isSafeInteger(price) || !Number.isSafeInteger(landingPrice)) {
+          throw new Error("Product contains a non-whole or unsafe monetary value.");
+        }
+        return {
+          id: Number(row.id),
+          variantId: Number(row.variantId),
+          artNo: row.artNo,
+          name: row.name,
+          type: row.type,
+          seasons: seasonsForClient(row.seasonValues),
+          colour: row.colour,
+          material: row.material,
+          price,
+          landingPrice: canSeeCost ? landingPrice : null,
+          primaryImagePath: row.primaryImagePath || null
+        };
+      })
+    });
+  } catch (error) {
+    next(error);
   }
 });
 
