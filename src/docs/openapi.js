@@ -37,6 +37,11 @@ const schemas = {
     quantity: integer, inventory: array(object({ size: id, quantity: integer })), boxStock: array(ref('Box')), images: array(ref('Image')),
     stockAdditions: array(object({ id, stockType: string, sizeRange: string, quantity: integer, isCancelled: { type: 'boolean' } })),
   }),
+  ProductSuggestion: object({
+    id, variantId: id, artNo: string, name: string, type: string, seasons: array(string), colour: string, material: string,
+    price: money, landingPrice: { ...money, nullable: true, description: 'Null for staff.' },
+    primaryImagePath: { type: 'string', nullable: true },
+  }, ['id', 'variantId', 'artNo', 'name', 'type', 'seasons', 'colour', 'material', 'price', 'landingPrice', 'primaryImagePath']),
   PriceUpdate: { ...object({ artNo: string, landingPriceUpdate: money, sellingPrice: money, price_unit: { type: 'string', enum: ['units', 'thousands'] } }, ['artNo']),
     anyOf: [{ required: ['landingPriceUpdate'] }, { required: ['sellingPrice'] }] },
   SaleInput: object({
@@ -46,6 +51,19 @@ const schemas = {
     price_unit: { type: 'string', enum: ['units', 'thousands'], default: 'units' },
   }, ['art_no', 'colour_name', 'material_type']),
   SaleResult: object({ success: { type: 'boolean' }, message: string, remaining_quantity: integer, opened_box: { type: 'boolean' } }),
+  DailySale: object({
+    id: { type: 'string', pattern: '^(pair|box)-[0-9]+$' }, saleType: { type: 'string', enum: ['pair', 'box'] },
+    size: string, quantity: integer, soldPrice: money,
+    landingPrice: { ...money, nullable: true, description: 'Null for staff. Box values are total landed cost for the sold quantity.' },
+    soldAt: { type: 'string', example: '2026-10-17 14:35:00' }, isCancelled: { type: 'boolean' },
+    artNo: string, name: string, type: string, colour: string, material: string, soldBy: string,
+    imagePath: { type: 'string', nullable: true },
+  }, ['id', 'saleType', 'size', 'quantity', 'soldPrice', 'landingPrice', 'soldAt', 'isCancelled', 'artNo', 'name', 'colour', 'material', 'soldBy', 'imagePath']),
+  DailySalesData: object({
+    date: { type: 'string', format: 'date' },
+    viewer: object({ canViewLandingPrice: { type: 'boolean' } }, ['canViewLandingPrice']),
+    items: array(ref('DailySale')),
+  }, ['date', 'viewer', 'items']),
   Cancellation: object({ id: string, isCancelled: { type: 'boolean' }, restoredQuantity: integer }),
 };
 
@@ -92,6 +110,14 @@ add('put', '/api/store', 'updateStore', 'Store', 'Update store settings', {
   requestBody: body(object({ storeName: { type: 'string', minLength: 1, maxLength: 50 }, storeImage: ref('Image'), storeImagePath: string }, ['storeName']), { storeName: 'My shoe store' }),
 });
 add('get', '/api/products', 'listProducts', 'Products', 'List product variants in the active store', { description: member, schema: envelope(array(ref('Product'))) });
+add('get', '/api/products/suggestions', 'suggestProducts', 'Products', 'Suggest matching variants in the active store', {
+  description: member + ' Results rank exact article number, article prefix, then other substring matches. Landing cost is null for staff.',
+  parameters: [
+    { ...query('q', { type: 'string', minLength: 1, maxLength: 100 }, 'Case-insensitive article, name, colour, or material text.'), required: true },
+    query('limit', { type: 'integer', minimum: 1, maximum: 20, default: 6 }),
+  ],
+  schema: envelope(object({ items: array(ref('ProductSuggestion')) }, ['items'])),
+});
 add('get', '/api/products/match', 'matchProducts', 'Products', 'Match article number, colour, and material', {
   description: member + ' Returns an empty array if any filter is missing or nothing matches.',
   parameters: ['artNo', 'colour', 'material'].map(name => query(name)), schema: envelope(array(ref('Product'))),
@@ -107,7 +133,7 @@ add('post', '/api/products', 'createProduct', 'Products', 'Create a variant or a
 paths['/api/products'].post.responses[200] = response(envelope(ref('Product')), 'Existing variant updated and inventory incremented');
 add('get', '/api/products/{id}', 'getProduct', 'Products', 'Get a product in the active store', { description: member, parameters: [param()], schema: envelope(ref('Product')) });
 add('put', '/api/products/{id}', 'updateProduct', 'Products', 'Update product details and images', {
-  description: manager + ' Requires the full product payload. This operation updates details, seasons, and images; use price and inventory endpoints to change prices or stock. Omitted existing images are removed. variantId selects a variant; if omitted the most recently updated variant is selected.',
+  description: manager + ' Requires the full product payload. This operation updates details and seasons; use price and inventory endpoints to change prices or stock. When images is present its array order is authoritative and omitted entries are removed. Omitting images preserves current images. variantId selects a variant; if omitted the most recently updated variant is selected.',
   parameters: [param()], schema: envelope(ref('Product')), requestBody: body(ref('ProductInput'), productExample),
 });
 add('delete', '/api/products/{id}', 'deleteProduct', 'Products', 'Delete product variants belonging to the active store', { description: manager, parameters: [param()], schema: envelope(object({ id })) });
@@ -138,8 +164,8 @@ add('post', '/api/inventory/sold', 'recordSale', 'Sales', 'Record a pair or box 
   } } } },
 });
 add('get', '/api/sold-products', 'listSales', 'Sales', 'List sales for a date', {
-  description: member + ' Defaults to the database current date. Staff see only their own sales; landing costs require manager access.', parameters: [query('date', { type: 'string', format: 'date' }, 'YYYY-MM-DD')],
-  schema: envelope(object({ date: { type: 'string', format: 'date' }, viewer: object({ canViewLandingPrice: { type: 'boolean' } }), items: array(object({ id: string, saleType: string, quantity: integer, soldPrice: money, isCancelled: { type: 'boolean' } })) })),
+  description: member + ' Defaults to the current date in APP_TIMEZONE. Staff see only their own sales; landing costs require manager access. Cancelled sales remain visible.', parameters: [query('date', { type: 'string', format: 'date' }, 'Exact YYYY-MM-DD local calendar date.')],
+  schema: envelope(ref('DailySalesData')),
 });
 add('post', '/api/sold-products/{id}/cancel', 'cancelSale', 'Sales', 'Cancel a sale and restore inventory', {
   description: manager, parameters: [param('id', { type: 'string', pattern: '^(pair|box)-[0-9]+$', example: 'pair-1' })], schema: envelope(ref('Cancellation')),

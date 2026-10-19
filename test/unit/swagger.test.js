@@ -71,3 +71,29 @@ test('OpenAPI covers every application route and resolves every schema reference
     assert.equal(spec.components.securitySchemes.sessionCookie.in, 'cookie');
   });
 });
+
+test('OpenAPI publishes suggestion constraints and the enriched daily-sales shape', async () => {
+  await withApp(make(credentials), async origin => {
+    const spec = await (await fetch(origin + '/api/openapi.json', { headers: { authorization } })).json();
+    const suggestions = spec.paths['/api/products/suggestions'].get;
+    const q = suggestions.parameters.find(parameter => parameter.name === 'q');
+    const limit = suggestions.parameters.find(parameter => parameter.name === 'limit');
+    assert.equal(q.required, true);
+    assert.deepEqual(q.schema, { type: 'string', minLength: 1, maxLength: 100 });
+    assert.deepEqual(limit.schema, { type: 'integer', minimum: 1, maximum: 20, default: 6 });
+    const suggestion = spec.components.schemas.ProductSuggestion.properties;
+    for (const name of ['id','variantId','artNo','name','type','seasons','colour','material','price','landingPrice','primaryImagePath']) {
+      assert.ok(suggestion[name], name);
+    }
+    assert.equal(suggestion.landingPrice.nullable, true);
+
+    const sales = spec.paths['/api/sold-products'].get;
+    assert.ok(sales.parameters.some(parameter => parameter.name === 'date' && parameter.schema.format === 'date'));
+    const sale = spec.components.schemas.DailySale.properties;
+    for (const name of ['id','saleType','size','quantity','soldPrice','landingPrice','soldAt','isCancelled','artNo','name','colour','material','soldBy','imagePath']) {
+      assert.ok(sale[name], name);
+    }
+    assert.equal(sale.landingPrice.nullable, true);
+    assert.ok(spec.components.schemas.DailySalesData.properties.viewer.properties.canViewLandingPrice);
+  });
+});
