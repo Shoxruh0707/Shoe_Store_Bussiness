@@ -448,6 +448,7 @@ function validateProductPayload(payload) {
   const material = cleanText(payload.material);
   const inventory = normalizeInventoryRows(payload.inventory);
   const boxQuantity = parseNonNegativeInteger(payload.box_quantity ?? payload.boxQuantity ?? 0);
+  const imagesProvided = Object.prototype.hasOwnProperty.call(payload, "images");
   const images = normalizeImages(payload.images);
 
   if (!artNo) return { error: "Artno kiritilishi kerak." };
@@ -474,27 +475,37 @@ function validateProductPayload(payload) {
       material,
       inventory,
       boxQuantity,
+      imagesProvided,
       images
     }
   };
 }
 
-async function saveProductImages(connection, variantId, images) {
+function imageWriteError(message) {
+  return Object.assign(new Error(message), { expose: true, statusCode: 400 });
+}
+
+async function saveProductImages(connection, variantId, images, startOrder, fileChanges) {
   const savedImages = [];
 
-  for (const image of images) {
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index];
     if (!image.data && !image.tempId) continue;
 
     const imagePath = image.tempId ? await promoteTempImageFile(image.tempId) : await saveImageFile(image);
+    fileChanges.createdPaths.push(imagePath);
 
-    const [insert] = await connection.execute("INSERT INTO product_images (product_variant_id, image_path) VALUES (?, ?)", [
+    const sortOrder = startOrder + index;
+    const [insert] = await connection.execute("INSERT INTO product_images (product_variant_id, image_path, sort_order) VALUES (?, ?, ?)", [
       variantId,
-      imagePath
+      imagePath,
+      sortOrder
     ]);
 
     savedImages.push({
       id: insert.insertId,
-      path: imagePath
+      path: imagePath,
+      sortOrder
     });
   }
 
@@ -513,25 +524,48 @@ async function deleteUploadedImageFile(imagePath) {
   }
 }
 
-async function replaceProductImages(connection, variantId, images) {
+async function cleanupUploadedImageFiles(paths) {
+  for (const imagePath of new Set(paths)) {
+    try {
+      await deleteUploadedImageFile(imagePath);
+    } catch (error) {
+      logger.error(error);
+    }
+  }
+}
+
+async function replaceProductImages(connection, variantId, images, fileChanges) {
   const [existingImages] = await connection.execute(
-    "SELECT id, image_path AS path FROM product_images WHERE product_variant_id = ?",
+    "SELECT id, image_path AS path, sort_order AS sortOrder FROM product_images WHERE product_variant_id = ? ORDER BY sort_order, id",
     [variantId]
   );
   const existingById = new Map(existingImages.map((image) => [Number(image.id), image]));
+  const submittedIds = images.map((image) => Number(image.id || 0)).filter(Boolean);
+  if (new Set(submittedIds).size !== submittedIds.length) {
+    throw imageWriteError("Bir xil rasm bir necha marta yuborilmasligi kerak.");
+  }
+  if (submittedIds.some((imageId) => !existingById.has(imageId))) {
+    throw imageWriteError("Rasm bu mahsulot variantiga tegishli emas.");
+  }
+
   const retainedIds = new Set();
   const savedImages = [];
 
-  for (const image of images) {
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index];
     const imageId = Number(image.id || 0);
     if (imageId && existingById.has(imageId) && !image.data && !image.tempId) {
       retainedIds.add(imageId);
-      savedImages.push(existingById.get(imageId));
+      await connection.execute(
+        "UPDATE product_images SET sort_order = ? WHERE id = ? AND product_variant_id = ?",
+        [index, imageId, variantId]
+      );
+      savedImages.push({ ...existingById.get(imageId), sortOrder: index });
       continue;
     }
 
     if (image.data || image.tempId) {
-      const [savedImage] = await saveProductImages(connection, variantId, [image]);
+      const [savedImage] = await saveProductImages(connection, variantId, [image], index, fileChanges);
       if (savedImage?.id) {
         retainedIds.add(Number(savedImage.id));
         savedImages.push(savedImage);
@@ -542,7 +576,7 @@ async function replaceProductImages(connection, variantId, images) {
   const imagesToDelete = existingImages.filter((image) => !retainedIds.has(Number(image.id)));
   for (const image of imagesToDelete) {
     await connection.execute("DELETE FROM product_images WHERE id = ? AND product_variant_id = ?", [image.id, variantId]);
-    await deleteUploadedImageFile(image.path);
+    fileChanges.obsoletePaths.push(image.path);
   }
 
   return savedImages;
@@ -1240,7 +1274,7 @@ async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
     [product.variantId, storeId]
   );
   const [imageRows] = await pool.execute(
-    "SELECT id, image_path AS path FROM product_images WHERE product_variant_id = ? ORDER BY id",
+    "SELECT id, image_path AS path FROM product_images WHERE product_variant_id = ? ORDER BY sort_order, id",
     [product.variantId]
   );
   const [boxStockRows] = await pool.execute(
@@ -2387,6 +2421,8 @@ route("post", "/api/products", requireAuth, requireStoreOwner, requireStoreManag
   const storeId = currentStoreId(request);
   const actingUserId = request.user?.id || null;
   const connection = await pool.getConnection();
+  const fileChanges = { createdPaths: [], obsoletePaths: [] };
+  let committed = false;
 
   try {
     await connection.beginTransaction();
@@ -2404,9 +2440,14 @@ route("post", "/api/products", requireAuth, requireStoreOwner, requireStoreManag
       );
       const stockChange = await addStockRowsForProduct(connection, existing.variantId, data.inventory, storeId, data.boxQuantity);
       await recordStockAddition(connection, existing.variantId, storeId, actingUserId, stockChange);
-      await saveProductImages(connection, existing.variantId, data.images);
+      const [[order]] = await connection.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS nextOrder FROM product_images WHERE product_variant_id = ?",
+        [existing.variantId]
+      );
+      await saveProductImages(connection, existing.variantId, data.images, Number(order.nextOrder), fileChanges);
       await connection.execute("UPDATE products SET updated_at = NOW() WHERE id = ?", [existing.productId]);
       await connection.commit();
+      committed = true;
 
       const updatedProduct = await fetchProduct(existing.productId, storeId, existing.variantId);
       apiData(response, {
@@ -2432,8 +2473,9 @@ route("post", "/api/products", requireAuth, requireStoreOwner, requireStoreManag
       await writeProductSeasons(connection, existingProduct.productId, data.seasons);
       const stockChange = await writeStockRowsForProduct(connection, variantInsert.insertId, data.inventory, storeId, data.boxQuantity);
       await recordStockAddition(connection, variantInsert.insertId, storeId, actingUserId, stockChange);
-      await saveProductImages(connection, variantInsert.insertId, data.images);
+      await saveProductImages(connection, variantInsert.insertId, data.images, 0, fileChanges);
       await connection.commit();
+      committed = true;
 
       const createdProduct = await fetchProduct(existingProduct.productId, storeId, variantInsert.insertId);
       apiData(response, createdProduct, 201);
@@ -2454,13 +2496,17 @@ route("post", "/api/products", requireAuth, requireStoreOwner, requireStoreManag
     await writeProductSeasons(connection, productInsert.insertId, data.seasons);
     const stockChange = await writeStockRowsForProduct(connection, variantInsert.insertId, data.inventory, storeId, data.boxQuantity);
     await recordStockAddition(connection, variantInsert.insertId, storeId, actingUserId, stockChange);
-    await saveProductImages(connection, variantInsert.insertId, data.images);
+    await saveProductImages(connection, variantInsert.insertId, data.images, 0, fileChanges);
     await connection.commit();
+    committed = true;
 
     const createdProduct = await fetchProduct(productInsert.insertId, storeId, variantInsert.insertId);
     apiData(response, createdProduct, 201);
   } catch (error) {
-    await connection.rollback();
+    if (!committed) {
+      await connection.rollback();
+      await cleanupUploadedImageFiles(fileChanges.createdPaths);
+    }
     next(error);
   } finally {
     connection.release();
@@ -2478,6 +2524,8 @@ route("put", "/api/products/:id", requireAuth, requireStoreOwner, requireStoreMa
   const productId = Number(request.params.id);
   const storeId = currentStoreId(request);
   const connection = await pool.getConnection();
+  const fileChanges = { createdPaths: [], obsoletePaths: [] };
+  let committed = false;
 
   try {
     await connection.beginTransaction();
@@ -2510,12 +2558,17 @@ route("put", "/api/products/:id", requireAuth, requireStoreOwner, requireStoreMa
     );
 
     await writeProductSeasons(connection, productId, data.seasons);
-    await replaceProductImages(connection, variantId, data.images);
+    if (data.imagesProvided) await replaceProductImages(connection, variantId, data.images, fileChanges);
     await connection.commit();
+    committed = true;
+    await cleanupUploadedImageFiles(fileChanges.obsoletePaths);
 
     apiData(response, await fetchProduct(productId, storeId, variantId));
   } catch (error) {
-    await connection.rollback();
+    if (!committed) {
+      await connection.rollback();
+      await cleanupUploadedImageFiles(fileChanges.createdPaths);
+    }
     next(error);
   } finally {
     connection.release();

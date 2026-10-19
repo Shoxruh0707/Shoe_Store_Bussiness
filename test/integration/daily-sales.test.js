@@ -26,11 +26,11 @@ test('daily sales use local-day bounds, stable ordering, fallbacks and store iso
       `INSERT INTO sold_products_pair
          (id,store_id,seller_user_id,product_variant_id,size,sold_price,landing_price,sold_at,isCancelled)
        VALUES
-         (8,1,5,1,'38',80000,40000,'2026-10-16 23:59:59',FALSE),
-         (9,1,5,1,'38',90000,45000,'2026-10-17 12:00:00',FALSE),
-         (10,1,5,1,'38',100000,50000,'2026-10-17 12:00:00',TRUE),
-         (11,1,5,1,'38',110000,55000,'2026-10-18 00:00:00',FALSE),
-         (12,2,4,2,'38',120000,60000,'2026-10-17 13:00:00',FALSE)`
+         (8,1,5,1,'38',80000,40000,'2026-10-16 18:59:59',FALSE),
+         (9,1,5,1,'38',90000,45000,'2026-10-17 07:00:00',FALSE),
+         (10,1,5,1,'38',100000,50000,'2026-10-17 07:00:00',TRUE),
+         (11,1,5,1,'38',110000,55000,'2026-10-17 19:00:00',FALSE),
+         (12,2,4,2,'38',120000,60000,'2026-10-17 08:00:00',FALSE)`
     );
     await pool.query('SET FOREIGN_KEY_CHECKS=0');
     await pool.query('DELETE FROM users WHERE id=5');
@@ -61,7 +61,7 @@ test('omitted date uses application timezone and missing images return null', ()
     await pool.query(
       `INSERT INTO sold_products_pair
          (store_id,seller_user_id,product_variant_id,size,sold_price,landing_price,sold_at,isCancelled)
-       VALUES (1,1,1,'38',100000,50000,'2026-10-17 00:00:00',FALSE)`
+       VALUES (1,1,1,'38',100000,50000,'2026-10-16 19:00:00',FALSE)`
     );
     const result = await request(1, '/sold-products');
     assert.equal(result.status, 200);
@@ -75,12 +75,12 @@ test('daily sales preserve box totals and landing-price permissions', () =>
     await pool.query(
       `INSERT INTO sold_products_box
          (store_id,seller_user_id,box_stock_id,quantity,sold_price,landing_price,sold_at,isCancelled)
-       VALUES (1,3,1,2,300000,100000,'2026-10-17 09:00:00',FALSE)`
+       VALUES (1,3,1,2,300000,100000,'2026-10-17 04:00:00',FALSE)`
     );
     await pool.query(
       `INSERT INTO sold_products_pair
          (store_id,seller_user_id,product_variant_id,size,sold_price,landing_price,sold_at,isCancelled)
-       VALUES (1,3,1,'38',125000,50000,'2026-10-17 10:00:00',FALSE)`
+       VALUES (1,3,1,'38',125000,50000,'2026-10-17 05:00:00',FALSE)`
     );
 
     const manager = await request(2, '/sold-products?date=2026-10-17');

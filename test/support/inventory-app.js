@@ -28,7 +28,7 @@ async function withInventory(run, overrides = {}) {
  const r=await fetch(origin+'/api'+url,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
  return {status:r.status,body:r.status===204?null:await r.json(),headers:r.headers};
  };
- await run({pool,fixtures,request,login,origin});
+ await run({pool,fixtures,request,login,origin,uploadsDir:dir});
  });
  }finally{await fs.rm(dir,{recursive:true,force:true});}
  });

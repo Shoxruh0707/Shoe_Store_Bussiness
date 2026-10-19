@@ -12,8 +12,8 @@ test('timezone validation accepts IANA zones and rejects invalid identifiers', (
 test('explicit calendar dates require exact real YYYY-MM-DD values', () => {
   assert.deepEqual(resolveLocalDateRange('2028-02-29', 'Asia/Tashkent', 0), {
     date: '2028-02-29',
-    start: '2028-02-29 00:00:00',
-    end: '2028-03-01 00:00:00'
+    start: '2028-02-28 19:00:00',
+    end: '2028-02-29 19:00:00'
   });
   for (const value of [
     '', '2026-2-01', '2026-02-1', '2026-02-29', '2026-04-31',
@@ -25,12 +25,12 @@ test('omitted date resolves today in the configured timezone without host depend
   const now = Date.parse('2026-10-16T20:30:00.000Z');
   assert.deepEqual(resolveLocalDateRange(undefined, 'Asia/Tashkent', now), {
     date: '2026-10-17',
-    start: '2026-10-17 00:00:00',
-    end: '2026-10-18 00:00:00'
+    start: '2026-10-16 19:00:00',
+    end: '2026-10-17 19:00:00'
   });
   assert.deepEqual(resolveLocalDateRange('2026-12-31', 'Asia/Tashkent', now), {
     date: '2026-12-31',
-    start: '2026-12-31 00:00:00',
-    end: '2027-01-01 00:00:00'
+    start: '2026-12-30 19:00:00',
+    end: '2026-12-31 19:00:00'
   });
 });
