@@ -1779,7 +1779,7 @@ route("get", "/api/sold-products", requireAuth, requireStoreOwner, async (reques
            AND spb.sold_at < ?
            ${sellerOnly ? "AND spb.seller_user_id = ?" : ""}
        ) sales
-       ORDER BY soldAt DESC, saleId DESC`,
+       ORDER BY soldAt DESC, saleId DESC, saleType DESC`,
       queryParams
     );
 

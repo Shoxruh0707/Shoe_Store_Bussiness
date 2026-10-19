@@ -80,11 +80,12 @@ test('daily sales preserve box totals and landing-price permissions', () =>
     await pool.query(
       `INSERT INTO sold_products_pair
          (store_id,seller_user_id,product_variant_id,size,sold_price,landing_price,sold_at,isCancelled)
-       VALUES (1,3,1,'38',125000,50000,'2026-10-17 05:00:00',FALSE)`
+       VALUES (1,3,1,'38',125000,50000,'2026-10-17 04:00:00',FALSE)`
     );
 
     const manager = await request(2, '/sold-products?date=2026-10-17');
     assert.equal(manager.body.data.viewer.canViewLandingPrice, true);
+    assert.deepEqual(manager.body.data.items.map((item) => item.id), ['pair-1', 'box-1']);
     const managerBox = manager.body.data.items.find((item) => item.saleType === 'box');
     assert.equal(managerBox.soldPrice, 600000);
     assert.equal(managerBox.landingPrice, 200000);
