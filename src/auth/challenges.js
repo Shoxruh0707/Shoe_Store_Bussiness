@@ -19,18 +19,21 @@ function createChallengeService({ pool, mailer, clock = Date.now, randomInt = cr
   async function rateLimit(action, subject, ip) {
     const now = clock();
     const windowStart = Math.floor(now / TEN_MINUTES) * TEN_MINUTES;
-    const bucket = crypto.createHmac('sha256', digestSecret).update(`${action}\0${subject}\0${ip || ''}`).digest('hex');
-    await pool.execute(
-      `INSERT INTO auth_rate_limits (bucket_key,action,window_started_at,attempts)
-       VALUES (?,?,?,1)
-       ON DUPLICATE KEY UPDATE attempts=attempts+1`,
-      [bucket, action, sqlDate(windowStart)]
-    );
-    const [[row]] = await pool.execute(
-      'SELECT attempts FROM auth_rate_limits WHERE bucket_key=? AND action=? AND window_started_at=?',
-      [bucket, action, sqlDate(windowStart)]
-    );
-    if (row.attempts > 5) throw failure('RATE_LIMITED', 429);
+    const dimensions = [[`subject:${subject}`, 5], [`ip:${ip || 'unknown'}`, 20]];
+    for (const [dimension, maximum] of dimensions) {
+      const bucket = crypto.createHmac('sha256', digestSecret).update(`${action}\0${dimension}`).digest('hex');
+      await pool.execute(
+        `INSERT INTO auth_rate_limits (bucket_key,action,window_started_at,attempts)
+         VALUES (?,?,?,1)
+         ON DUPLICATE KEY UPDATE attempts=attempts+1`,
+        [bucket, action, sqlDate(windowStart)]
+      );
+      const [[row]] = await pool.execute(
+        'SELECT attempts FROM auth_rate_limits WHERE bucket_key=? AND action=? AND window_started_at=?',
+        [bucket, action, sqlDate(windowStart)]
+      );
+      if (row.attempts > maximum) throw failure('RATE_LIMITED', 429);
+    }
   }
 
   async function createChallenge({ purpose, email, userId = null, payload = null, ip }) {

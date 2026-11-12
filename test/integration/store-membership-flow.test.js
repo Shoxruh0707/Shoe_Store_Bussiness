@@ -7,6 +7,8 @@ const migrations = require('../../src/db/migrations');
 const { withApp } = require('../support/http');
 const { createApp } = require('../../server');
 const { readConfig } = require('../../src/config');
+const bcrypt = require('bcryptjs');
+const { createMembershipService } = require('../../src/store/memberships');
 
 function request(origin, method, path, body, cookie) {
   const headers = {};
@@ -100,4 +102,32 @@ test('store membership enforces invitation acceptance, one store, and role hiera
     assert.notEqual((await regenerated.json()).data.entryCode, created.entryCode);
     assert.equal((await request(origin, 'POST', '/api/store/join-requests', { entryCode: created.entryCode }, staleCodeUser.cookie)).status, 404);
   });
+}));
+
+test('parallel invitation acceptance creates at most one store membership', () => withTestDatabase(async ({ pool }) => {
+  const connection = await pool.getConnection();
+  try { await runMigrations({ connection, migrations, mode: 'apply' }); } finally { connection.release(); }
+  const passwordHash = bcrypt.hashSync('not-used', 4);
+  const ids = [];
+  for (const [index, label] of ['OwnerA', 'OwnerB', 'Target'].entries()) {
+    const [inserted] = await pool.execute(
+      `INSERT INTO users (fname,lname,email,email_verified_at,phone_number,password_hash,role)
+       VALUES (?, 'User', ?, NOW(), ?, ?, 'seller')`,
+      [label, `${label.toLowerCase()}@example.com`, `+99891111${String(index).padStart(4, '0')}`, passwordHash]
+    );
+    ids.push(inserted.insertId);
+  }
+  const service = createMembershipService({ pool, digestSecret: 'o'.repeat(32) });
+  const first = await service.createStore(ids[0], { storeName: 'First' });
+  const second = await service.createStore(ids[1], { storeName: 'Second' });
+  const inviteA = await service.invite(first.storeId, ids[0], 'owner', { phoneNumber: '+998911110002', role: 'seller' });
+  const inviteB = await service.invite(second.storeId, ids[1], 'owner', { phoneNumber: '+998911110002', role: 'manager' });
+
+  const results = await Promise.allSettled([
+    service.resolveInvitation(ids[2], inviteA.id, true),
+    service.resolveInvitation(ids[2], inviteB.id, true)
+  ]);
+  assert.equal(results.filter(item => item.status === 'fulfilled').length, 1);
+  const [[membership]] = await pool.execute('SELECT COUNT(*) AS count FROM store_users WHERE user_id=?', [ids[2]]);
+  assert.equal(membership.count, 1);
 }));

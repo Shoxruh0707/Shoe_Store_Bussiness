@@ -38,7 +38,12 @@ test('signup challenge stores no plaintext secret and creates the account only a
   assert.notEqual(challenge.codeDigest, '123456');
   assert.doesNotMatch(JSON.stringify(challenge.payload), /correct-horse|123456/);
 
-  const user = await service.verifySignup({ challengeId: started.challengeId, code: '123456' });
+  const attempts = await Promise.allSettled([
+    service.verifySignup({ challengeId: started.challengeId, code: '123456' }),
+    service.verifySignup({ challengeId: started.challengeId, code: '123456' })
+  ]);
+  assert.equal(attempts.filter(item => item.status === 'fulfilled').length, 1);
+  const user = attempts.find(item => item.status === 'fulfilled').value;
   assert.equal(user.email, 'owner@example.com');
   assert.equal(user.phoneNumber, '+998901112233');
   assert.equal((await pool.query('SELECT COUNT(*) AS n FROM users'))[0][0].n, 1);

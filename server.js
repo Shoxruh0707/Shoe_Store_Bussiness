@@ -11,6 +11,7 @@ function createApp({ pool, config = {}, clock = Date.now, uploads = {}, logger =
 const env = config;
 async function testConnection() { const connection = await pool.getConnection(); try { await connection.ping(); } finally { connection.release(); } }
 const app = express();
+app.set("trust proxy", 1);
 function route(method, url, ...handlers) {
   app[method](url, ...handlers.map(handler => (request, response, next) => {
     try { Promise.resolve(handler(request, response, next)).catch(next); } catch (error) { next(error); }
@@ -789,7 +790,7 @@ async function requireAuth(request, response, next) {
         phoneNumber: defaultOwnerPhone,
         role: "admin"
       };
-      request.store = { id: defaultStoreId, storeName: defaultStoreName };
+      request.store = { id: defaultStoreId, storeName: defaultStoreName, storeRole: "owner" };
       next();
       return;
     }
@@ -827,11 +828,6 @@ async function requireAuth(request, response, next) {
 }
 
 function requireStoreOwner(request, response, next) {
-  if (!request.user || !["admin", "seller"].includes(request.user.role)) {
-    apiMessage(response, "Bu sahifa faqat adminlar uchun.", 403);
-    return;
-  }
-
   if (!request.store) {
     apiMessage(response, "Avval do'kon ro'yxatdan o'tkazilishi kerak.", 403);
     return;
@@ -841,7 +837,7 @@ function requireStoreOwner(request, response, next) {
 }
 
 function hasStoreManagerAccess(request) {
-  return request.user?.role === "admin" || ["owner", "manager"].includes(request.store?.storeRole);
+  return ["owner", "manager"].includes(request.store?.storeRole);
 }
 
 function requireStoreManager(request, response, next) {
@@ -854,7 +850,7 @@ function requireStoreManager(request, response, next) {
 }
 
 function requireStoreOwnerRole(request, response, next) {
-  if (request.user?.role !== "admin" && request.store?.storeRole !== "owner") {
+  if (request.store?.storeRole !== "owner") {
     apiMessage(response, "Bu amal faqat do'kon egasi uchun.", 403);
     return;
   }

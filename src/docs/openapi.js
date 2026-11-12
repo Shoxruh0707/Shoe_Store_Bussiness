@@ -18,7 +18,7 @@ const member = 'Requires an authenticated admin or seller with an active store m
 const schemas = {
   Error: object({ success: { type: 'boolean', enum: [false] }, error: string, message: string }),
   User: object({ id, fname: string, lname: string, email: { type: 'string', format: 'email', nullable: true }, emailVerifiedAt: { type: 'string', nullable: true }, phoneNumber: string, role: string }),
-  Store: object({ id, storeName: string, storeRole: string, storeImage: { type: 'string', nullable: true } }),
+  Store: object({ id, storeName: string, storeRole: { type: 'string', enum: ['owner', 'manager', 'seller'] }, storeImage: { type: 'string', nullable: true }, description: { type: 'string', nullable: true }, telegramName: { type: 'string', nullable: true }, telegramLink: { type: 'string', nullable: true }, telegramId: { type: 'string', nullable: true }, instagram: { type: 'string', nullable: true } }),
   Session: object({ user: ref('User'), store: { type: 'object', nullable: true, properties: { id, storeName: string, storeRole: string, storeImage: { type: 'string', nullable: true } } } }),
   Image: object({ id, name: string, type: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] }, data: { type: 'string', description: 'Base64 image bytes or a data URL.' }, tempId: string, path: string }),
   InventoryRow: object({ size, quantity: integer }, ['size', 'quantity']),
@@ -33,13 +33,13 @@ const schemas = {
     images: array(ref('Image')), variantId: id,
   }, ['artNo', 'type', 'seasons', 'price', 'landingPrice', 'colour', 'material']),
   Product: object({ id, variantId: id, artNo: string, name: string, type: string, seasons: array(string), colour: string, material: string,
-    price: { oneOf: [{ type: 'number' }, string] }, landingPrice: { oneOf: [{ type: 'number', nullable: true }, string], description: 'Decimal value; hidden from staff.' },
+    price: { oneOf: [{ type: 'number' }, string] }, landingPrice: { oneOf: [{ type: 'number', nullable: true }, string], description: 'Decimal value; hidden from sellers.' },
     quantity: integer, inventory: array(object({ size: id, quantity: integer })), boxStock: array(ref('Box')), images: array(ref('Image')),
     stockAdditions: array(object({ id, stockType: string, sizeRange: string, quantity: integer, isCancelled: { type: 'boolean' } })),
   }),
   ProductSuggestion: object({
     id, variantId: id, artNo: string, name: string, type: string, seasons: array(string), colour: string, material: string,
-    price: money, landingPrice: { ...money, nullable: true, description: 'Null for staff.' },
+    price: money, landingPrice: { ...money, nullable: true, description: 'Null for sellers.' },
     primaryImagePath: { type: 'string', nullable: true },
   }, ['id', 'variantId', 'artNo', 'name', 'type', 'seasons', 'colour', 'material', 'price', 'landingPrice', 'primaryImagePath']),
   PriceUpdate: { ...object({ artNo: string, landingPriceUpdate: money, sellingPrice: money, price_unit: { type: 'string', enum: ['units', 'thousands'] } }, ['artNo']),
@@ -54,7 +54,7 @@ const schemas = {
   DailySale: object({
     id: { type: 'string', pattern: '^(pair|box)-[0-9]+$' }, saleType: { type: 'string', enum: ['pair', 'box'] },
     size: string, quantity: integer, soldPrice: money,
-    landingPrice: { ...money, nullable: true, description: 'Null for staff. Box values are total landed cost for the sold quantity.' },
+    landingPrice: { ...money, nullable: true, description: 'Null for sellers. Box values are total landed cost for the sold quantity.' },
     soldAt: { type: 'string', example: '2026-10-17 14:35:00' }, isCancelled: { type: 'boolean' },
     artNo: string, name: string, type: string, colour: string, material: string, soldBy: string,
     imagePath: { type: 'string', nullable: true },
@@ -66,7 +66,8 @@ const schemas = {
   }, ['date', 'viewer', 'items']),
   Cancellation: object({ id: string, isCancelled: { type: 'boolean' }, restoredQuantity: integer }),
   VerificationAccepted: object({ accepted: { type: 'boolean', enum: [true] } }, ['accepted']),
-  VerificationCode: object({ challengeId: id, code: { type: 'string', pattern: '^[0-9]{6}$' } }, ['challengeId', 'code']),
+  ChallengeStarted: object({ challengeId: { type: 'string', format: 'uuid' }, expiresAt: { type: 'string', format: 'date-time' } }, ['challengeId', 'expiresAt']),
+  VerificationCode: object({ challengeId: { type: 'string', format: 'uuid' }, code: { type: 'string', pattern: '^[0-9]{6}$' } }, ['challengeId', 'code']),
   StoreMember: object({ userId: id, fname: string, lname: string, phoneNumber: string, email: { type: 'string', nullable: true }, role: { type: 'string', enum: ['owner', 'manager', 'seller'] }, joinedAt: string }),
   StoreInvitation: object({ id, role: { type: 'string', enum: ['manager', 'seller'] }, storeId: id, storeName: string, createdAt: string }),
   JoinRequest: object({ id, userId: id, fname: string, lname: string, phoneNumber: string, requestedAt: string }),
@@ -80,7 +81,10 @@ function add(method, path, operationId, tag, summary, options = {}) {
     400: response(ref('Error'), 'Invalid request'),
     ...(!isPublic ? { 401: response(ref('Error'), 'Login required'), 403: response(ref('Error'), 'Insufficient store permissions') } : {}),
     404: response(ref('Error'), 'Resource not found'),
+    409: response(ref('Error'), 'State conflict'),
+    429: response(ref('Error'), 'Rate limit exceeded'),
     500: response(ref('Error'), 'Internal server error'),
+    503: response(ref('Error'), 'Service unavailable'),
   };
   paths[path] ||= {};
   paths[path][method] = { operationId, tags: [tag], summary, ...(isPublic ? { security: [] } : {}), responses, ...details };
@@ -88,14 +92,14 @@ function add(method, path, operationId, tag, summary, options = {}) {
 
 add('post', '/api/auth/signup', 'legacySignup', 'Authentication', 'Retired direct signup endpoint', { public: true, status: 410, schema: ref('Error') });
 const signupFields = object({ fname: { type: 'string', minLength: 1, maxLength: 20 }, lname: { type: 'string', minLength: 1, maxLength: 20 }, email: { type: 'string', format: 'email' }, phoneNumber: { type: 'string', pattern: '^\\+[1-9][0-9]{6,13}$' }, password: { type: 'string', format: 'password', minLength: 8, maxLength: 72 }, passwordConfirmation: { type: 'string', format: 'password' } }, ['fname', 'lname', 'email', 'phoneNumber', 'password', 'passwordConfirmation']);
-add('post', '/api/auth/signup/start', 'startSignup', 'Authentication', 'Send the signup email code', { public: true, status: 202, schema: ref('VerificationAccepted'), requestBody: body(signupFields) });
+add('post', '/api/auth/signup/start', 'startSignup', 'Authentication', 'Send the signup email code', { public: true, status: 202, schema: ref('ChallengeStarted'), requestBody: body(signupFields) });
 add('post', '/api/auth/signup/verify', 'verifySignup', 'Authentication', 'Verify signup and create the account', { public: true, status: 201, schema: ref('Session'), requestBody: body(ref('VerificationCode')) });
-add('post', '/api/auth/verification/resend', 'resendVerification', 'Authentication', 'Resend an active verification code', { public: true, status: 202, schema: ref('VerificationAccepted'), requestBody: body(object({ challengeId: id }, ['challengeId'])) });
+add('post', '/api/auth/verification/resend', 'resendVerification', 'Authentication', 'Resend an active verification code', { public: true, status: 202, schema: ref('ChallengeStarted'), requestBody: body(object({ challengeId: { type: 'string', format: 'uuid' } }, ['challengeId'])) });
 add('post', '/api/auth/password-reset/start', 'startPasswordReset', 'Authentication', 'Send a password reset code when the email exists', { public: true, status: 202, schema: ref('VerificationAccepted'), requestBody: body(object({ email: { type: 'string', format: 'email' } }, ['email'])) });
 add('post', '/api/auth/password-reset/verify', 'verifyPasswordReset', 'Authentication', 'Exchange a reset code for a short-lived token', { public: true, schema: object({ resetToken: string }, ['resetToken']), requestBody: body(ref('VerificationCode')) });
-add('post', '/api/auth/password-reset/complete', 'completePasswordReset', 'Authentication', 'Set a new password and revoke all sessions', { public: true, schema: ref('VerificationAccepted'), requestBody: body(object({ resetToken: string, password: { type: 'string', format: 'password' }, passwordConfirmation: { type: 'string', format: 'password' } }, ['resetToken', 'password', 'passwordConfirmation'])) });
+add('post', '/api/auth/password-reset/complete', 'completePasswordReset', 'Authentication', 'Set a new password and revoke all sessions', { public: true, status: 204, requestBody: body(object({ resetToken: string, password: { type: 'string', format: 'password' }, passwordConfirmation: { type: 'string', format: 'password' } }, ['resetToken', 'password', 'passwordConfirmation'])) });
 add('post', '/api/auth/email/start', 'startEmailAttachment', 'Authentication', 'Send a code to attach an email to the account', { status: 202, schema: ref('VerificationAccepted'), requestBody: body(object({ email: { type: 'string', format: 'email' } }, ['email'])) });
-add('post', '/api/auth/email/verify', 'verifyEmailAttachment', 'Authentication', 'Verify and attach the account email', { schema: ref('User'), requestBody: body(ref('VerificationCode')) });
+add('post', '/api/auth/email/verify', 'verifyEmailAttachment', 'Authentication', 'Verify and attach the account email', { schema: object({ email: { type: 'string', format: 'email' }, verified: { type: 'boolean', enum: [true] } }), requestBody: body(ref('VerificationCode')) });
 add('post', '/api/auth/signout-all', 'signoutAll', 'Authentication', 'Revoke every session for this account', { status: 204 });
 
 add('post', '/api/auth/login', 'login', 'Authentication', 'Sign in with an existing account', {
@@ -133,7 +137,7 @@ add('patch', '/api/store/members/{userId}', 'changeStoreMemberRole', 'Store acce
 add('delete', '/api/store/members/{userId}', 'removeStoreMember', 'Store access', 'Remove a member according to the role hierarchy', { description: manager, parameters: [param('userId')], schema: envelope(object({ removed: { type: 'boolean' }, userId: id })) });
 add('get', '/api/products', 'listProducts', 'Products', 'List product variants in the active store', { description: member, schema: envelope(array(ref('Product'))) });
 add('get', '/api/products/suggestions', 'suggestProducts', 'Products', 'Suggest matching variants in the active store', {
-  description: member + ' Results rank exact article number, article prefix, then other substring matches. Landing cost is null for staff.',
+  description: member + ' Results rank exact article number, article prefix, then other substring matches. Landing cost is null for sellers.',
   parameters: [
     { ...query('q', { type: 'string', minLength: 1, maxLength: 100 }, 'Case-insensitive article, name, colour, or material text.'), required: true },
     query('limit', { type: 'integer', minimum: 1, maximum: 20, default: 6 }),

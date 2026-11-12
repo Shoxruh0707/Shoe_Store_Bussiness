@@ -19,7 +19,7 @@ test('foreign variants, prices and sale cancellation remain store-scoped',()=>wi
  const [[stored]]=await pool.query('SELECT isCancelled FROM sold_products_pair WHERE store_id=2');assert.equal(stored.isCancelled,0);
  const [[variant]]=await pool.query('SELECT price FROM product_variant WHERE id=2');assert.equal(variant.price,100000);
 }));
-test('staff cannot retrieve cost through detail, matching, lookup or sales',()=>withInventory(async({request})=>{
+test('seller cannot retrieve cost through detail, matching, lookup or sales',()=>withInventory(async({request})=>{
  for(const url of ['/products/1','/products/match?artNo=ART1&colour=Black&material=Leather','/products/lookup?artNo=ART1']) {
  const r=await request(3,url);assert.equal(r.status,200);const data=r.body.data;const values=Array.isArray(data)?data:[data.product||data];for(const value of values)assert.equal(value.landingPrice,null,url);
  }
