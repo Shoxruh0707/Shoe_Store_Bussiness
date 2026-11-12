@@ -96,7 +96,7 @@ app.use((request, response, next) => {
     response.setHeader("Vary", "Origin");
     response.setHeader("Access-Control-Allow-Credentials", "true");
     response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+    response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   }
 
   if (request.method === "OPTIONS") {
@@ -122,6 +122,9 @@ const effectiveMailer = mailer || require("./src/email/smtp-mailer").createSmtpM
 const challengeService = services.challengeService || require("./src/auth/challenges").createChallengeService({
   pool, mailer: effectiveMailer, clock, digestSecret: env.OTP_SECRET || sessionSecret
 });
+const membershipService = services.membershipService || require("./src/store/memberships").createMembershipService({
+  pool, digestSecret: env.OTP_SECRET || sessionSecret
+});
 const { permissionsForRole } = require("./src/store/permissions");
 const DUMMY_PASSWORD_HASH = "$2b$10$esc2kYYKPeZ1pFrXx9PESOCMk9zq.y2swfX5DqxMmz0e0tHuF.hdG";
 function readSession(request) { return sessionCodec.decode(request.headers.cookie); }
@@ -135,6 +138,12 @@ function setSessionCookie(response, user) {
 function clearSessionCookie(response) {
   const secure = sessionCookieSecure ? "; Secure" : "";
   response.setHeader("Set-Cookie", `session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`);
+}
+
+function userForClient(user) {
+  if (!user) return user;
+  const { passwordHash, sessionVersion, ...safeUser } = user;
+  return safeUser;
 }
 
 function parsePositiveNumber(value) {
@@ -341,10 +350,22 @@ function validateStoreSettingsPayload(payload) {
     return { error: "Do'kon rasmi turi topilmadi." };
   }
 
+  const optionalLimits = { description: 5000, telegramName: 100, telegramLink: 255, telegramId: 45, instagram: 255 };
+  const optional = {};
+  for (const [field, maximum] of Object.entries(optionalLimits)) {
+    if (payload[field] === undefined) optional[field] = undefined;
+    else {
+      const value = cleanText(payload[field]);
+      if (value.length > maximum) return { error: `${field} is too long.` };
+      optional[field] = value || null;
+    }
+  }
+
   return {
     store: {
       storeName,
-      storeImage: image
+      storeImage: image,
+      ...optional
     }
   };
 }
@@ -733,7 +754,12 @@ async function storeForUser(userId) {
        s.id,
        s.store_name AS storeName,
        su.role AS storeRole,
-       s.store_image AS storeImage
+       s.store_image AS storeImage,
+       s.description,
+       s.channel_name_telegram AS telegramName,
+       s.channel_link_telegram AS telegramLink,
+       s.channel_id AS telegramId,
+       s.instagram
      FROM store_users su
      INNER JOIN store s ON s.id = su.store_id
      WHERE su.user_id = ?
@@ -748,7 +774,7 @@ async function storeForUser(userId) {
 async function hydrateAuthenticatedUser(user, response) {
   if (response) setSessionCookie(response, user);
   return {
-    user,
+    user: userForClient(user),
     store: ["admin", "seller"].includes(user.role) ? await storeForUser(user.id) : null
   };
 }
@@ -825,6 +851,19 @@ function requireStoreManager(request, response, next) {
   }
 
   next();
+}
+
+function requireStoreOwnerRole(request, response, next) {
+  if (request.user?.role !== "admin" && request.store?.storeRole !== "owner") {
+    apiMessage(response, "Bu amal faqat do'kon egasi uchun.", 403);
+    return;
+  }
+  next();
+}
+
+function positiveId(value) {
+  const result = Number(value);
+  return Number.isSafeInteger(result) && result > 0 ? result : null;
 }
 
 function currentStoreId(request) {
@@ -1332,7 +1371,7 @@ route("post", "/api/auth/signup/start", async (request, response) => {
 route("post", "/api/auth/signup/verify", async (request, response) => {
   const user = await challengeService.verifySignup(request.body || {});
   setSessionCookie(response, user);
-  response.status(201).json({ user, store: null, onboardingRequired: true, permissions: permissionsForRole(null) });
+  response.status(201).json({ user: userForClient(user), store: null, onboardingRequired: true, permissions: permissionsForRole(null) });
 });
 
 route("post", "/api/auth/verification/resend", async (request, response) => {
@@ -1384,7 +1423,7 @@ route("post", "/api/auth/login", async (request, response, next) => {
 
 route("get", "/api/auth/me", requireAuth, (request, response) => {
   response.json({
-    user: request.user,
+    user: userForClient(request.user),
     store: request.store,
     onboardingRequired: !request.store,
     permissions: permissionsForRole(request.store?.storeRole)
@@ -1405,6 +1444,17 @@ route("post", "/api/auth/signout-all", requireAuth, async (request, response) =>
   response.status(204).end();
 });
 
+route("post", "/api/store", requireAuth, async (request, response, next) => {
+  try {
+    let storeImagePath = cleanText(request.body?.storeImagePath);
+    if (request.body?.storeImage?.data) storeImagePath = await saveImageFile(request.body.storeImage);
+    const created = await membershipService.createStore(request.user.id, { ...(request.body || {}), storeImagePath });
+    apiData(response, { store: await storeForUser(request.user.id), entryCode: created.entryCode }, 201);
+  } catch (error) {
+    next(error);
+  }
+});
+
 route("get", "/api/store", requireAuth, requireStoreOwner, async (request, response, next) => {
   try {
     const store = await storeForUser(request.user.id);
@@ -1419,7 +1469,7 @@ route("get", "/api/store", requireAuth, requireStoreOwner, async (request, respo
   }
 });
 
-route("put", "/api/store", requireAuth, requireStoreOwner, requireStoreManager, async (request, response, next) => {
+route("put", "/api/store", requireAuth, requireStoreOwner, requireStoreOwnerRole, async (request, response, next) => {
   const validation = validateStoreSettingsPayload(request.body || {});
   if (validation.error) {
     apiMessage(response, validation.error, 400);
@@ -1438,11 +1488,21 @@ route("put", "/api/store", requireAuth, requireStoreOwner, requireStoreManager, 
     await pool.execute(
       `UPDATE store
        SET store_name = ?,
-           store_image = COALESCE(NULLIF(?, ''), store_image)
+           store_image = COALESCE(NULLIF(?, ''), store_image),
+           description = ?,
+           channel_name_telegram = ?,
+           channel_link_telegram = ?,
+           channel_id = ?,
+           instagram = ?
        WHERE id = ?`,
       [
         data.storeName,
         storeImagePath,
+        data.description === undefined ? request.store.description : data.description,
+        data.telegramName === undefined ? request.store.telegramName : data.telegramName,
+        data.telegramLink === undefined ? request.store.telegramLink : data.telegramLink,
+        data.telegramId === undefined ? request.store.telegramId : data.telegramId,
+        data.instagram === undefined ? request.store.instagram : data.instagram,
         storeId
       ]
     );
@@ -1451,6 +1511,67 @@ route("put", "/api/store", requireAuth, requireStoreOwner, requireStoreManager, 
   } catch (error) {
     next(error);
   }
+});
+
+route("post", "/api/store/entry-code/regenerate", requireAuth, requireStoreOwner, requireStoreOwnerRole, async (request, response) => {
+  apiData(response, await membershipService.regenerateEntryCode(request.store.id));
+});
+
+route("post", "/api/store/join-requests", requireAuth, async (request, response) => {
+  apiData(response, await membershipService.requestJoin(request.user.id, request.body || {}), 201);
+});
+
+route("get", "/api/store/join-requests", requireAuth, requireStoreOwner, requireStoreManager, async (request, response) => {
+  apiData(response, await membershipService.listJoinRequests(request.store.id));
+});
+
+route("post", "/api/store/join-requests/:id/approve", requireAuth, requireStoreOwner, requireStoreManager, async (request, response) => {
+  const requestId = positiveId(request.params.id);
+  if (!requestId) return apiMessage(response, "Invalid join request ID.", 400);
+  apiData(response, await membershipService.resolveJoinRequest(request.store.id, request.user.id, request.store.storeRole, requestId, cleanText(request.body?.role)));
+});
+
+route("post", "/api/store/join-requests/:id/reject", requireAuth, requireStoreOwner, requireStoreManager, async (request, response) => {
+  const requestId = positiveId(request.params.id);
+  if (!requestId) return apiMessage(response, "Invalid join request ID.", 400);
+  apiData(response, await membershipService.resolveJoinRequest(request.store.id, request.user.id, request.store.storeRole, requestId, null));
+});
+
+route("post", "/api/store/invitations", requireAuth, requireStoreOwner, requireStoreManager, async (request, response) => {
+  apiData(response, await membershipService.invite(request.store.id, request.user.id, request.store.storeRole, request.body || {}), 201);
+});
+
+route("get", "/api/auth/store-invitations", requireAuth, async (request, response) => {
+  apiData(response, await membershipService.listInvitations(request.user.id));
+});
+
+route("post", "/api/auth/store-invitations/:id/accept", requireAuth, async (request, response) => {
+  const invitationId = positiveId(request.params.id);
+  if (!invitationId) return apiMessage(response, "Invalid invitation ID.", 400);
+  const accepted = await membershipService.resolveInvitation(request.user.id, invitationId, true);
+  apiData(response, { ...accepted, store: await storeForUser(request.user.id) });
+});
+
+route("post", "/api/auth/store-invitations/:id/reject", requireAuth, async (request, response) => {
+  const invitationId = positiveId(request.params.id);
+  if (!invitationId) return apiMessage(response, "Invalid invitation ID.", 400);
+  apiData(response, await membershipService.resolveInvitation(request.user.id, invitationId, false));
+});
+
+route("get", "/api/store/members", requireAuth, requireStoreOwner, requireStoreManager, async (request, response) => {
+  apiData(response, await membershipService.listMembers(request.store.id));
+});
+
+route("patch", "/api/store/members/:userId", requireAuth, requireStoreOwner, requireStoreOwnerRole, async (request, response) => {
+  const userId = positiveId(request.params.userId);
+  if (!userId) return apiMessage(response, "Invalid user ID.", 400);
+  apiData(response, await membershipService.changeRole(request.store.id, userId, cleanText(request.body?.role)));
+});
+
+route("delete", "/api/store/members/:userId", requireAuth, requireStoreOwner, requireStoreManager, async (request, response) => {
+  const userId = positiveId(request.params.userId);
+  if (!userId) return apiMessage(response, "Invalid user ID.", 400);
+  apiData(response, await membershipService.removeMember(request.store.id, request.store.storeRole, userId));
 });
 
 route("post", "/api/auth/signout", (_request, response) => {

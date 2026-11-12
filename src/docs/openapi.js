@@ -67,6 +67,9 @@ const schemas = {
   Cancellation: object({ id: string, isCancelled: { type: 'boolean' }, restoredQuantity: integer }),
   VerificationAccepted: object({ accepted: { type: 'boolean', enum: [true] } }, ['accepted']),
   VerificationCode: object({ challengeId: id, code: { type: 'string', pattern: '^[0-9]{6}$' } }, ['challengeId', 'code']),
+  StoreMember: object({ userId: id, fname: string, lname: string, phoneNumber: string, email: { type: 'string', nullable: true }, role: { type: 'string', enum: ['owner', 'manager', 'seller'] }, joinedAt: string }),
+  StoreInvitation: object({ id, role: { type: 'string', enum: ['manager', 'seller'] }, storeId: id, storeName: string, createdAt: string }),
+  JoinRequest: object({ id, userId: id, fname: string, lname: string, phoneNumber: string, requestedAt: string }),
 };
 
 const paths = {};
@@ -104,16 +107,30 @@ paths['/api/auth/login'].post.responses[401] = response(ref('Error'), 'Invalid p
 paths['/api/auth/login'].post.responses[200].headers = { 'Set-Cookie': { description: 'HTTP-only session cookie managed by the browser.', schema: string } };
 add('get', '/api/auth/me', 'currentSession', 'Authentication', 'Read your current user and store', { schema: ref('Session') });
 add('post', '/api/auth/signout', 'signout', 'Authentication', 'Clear the session cookie', { public: true, status: 204 });
+add('get', '/api/auth/store-invitations', 'listMyStoreInvitations', 'Store access', 'List the current user pending invitations', { schema: envelope(array(ref('StoreInvitation'))) });
+add('post', '/api/auth/store-invitations/{id}/accept', 'acceptStoreInvitation', 'Store access', 'Accept a pending invitation', { parameters: [param()], schema: envelope(object({ accepted: { type: 'boolean' }, storeId: id, store: ref('Store') })) });
+add('post', '/api/auth/store-invitations/{id}/reject', 'rejectStoreInvitation', 'Store access', 'Reject a pending invitation', { parameters: [param()], schema: envelope(object({ accepted: { type: 'boolean', enum: [false] } })) });
 add('get', '/api/health', 'health', 'System', 'Check database connectivity', { public: true, schema: object({ ok: { type: 'boolean' } }) });
 paths['/api/health'].get.responses[503] = response(object({ ok: { type: 'boolean', enum: [false] }, message: string }), 'Database unavailable');
 add('get', '/api/meta', 'metadata', 'System', 'List supported product attributes', {
   description: member, schema: envelope(object(Object.fromEntries(['types', 'shoeTypes', 'seasons', 'sizes', 'colours', 'materials'].map(key => [key, array(string)])))),
 });
+const storeSettings = object({ storeName: { type: 'string', minLength: 1, maxLength: 50 }, description: { type: 'string', nullable: true }, storeImagePath: { type: 'string', nullable: true }, telegramName: { type: 'string', nullable: true }, telegramLink: { type: 'string', nullable: true }, telegramId: { type: 'string', nullable: true }, instagram: { type: 'string', nullable: true } }, ['storeName']);
+add('post', '/api/store', 'createStore', 'Store', 'Create the caller one store and owner membership', { status: 201, requestBody: body(storeSettings), schema: envelope(object({ store: ref('Store'), entryCode: { type: 'string', pattern: '^[A-F0-9]{10}$' } })) });
 add('get', '/api/store', 'getStore', 'Store', 'Read the active store', { description: member, schema: envelope(ref('Store')) });
 add('put', '/api/store', 'updateStore', 'Store', 'Update store settings', {
-  description: manager, schema: envelope(ref('Store')),
-  requestBody: body(object({ storeName: { type: 'string', minLength: 1, maxLength: 50 }, storeImage: ref('Image'), storeImagePath: string }, ['storeName']), { storeName: 'My shoe store' }),
+  description: 'Owner only.', schema: envelope(ref('Store')),
+  requestBody: body(storeSettings, { storeName: 'My shoe store' }),
 });
+add('post', '/api/store/entry-code/regenerate', 'regenerateStoreEntryCode', 'Store access', 'Replace the store entry code', { description: 'Owner only. The plaintext code is returned once.', schema: envelope(object({ entryCode: { type: 'string', pattern: '^[A-F0-9]{10}$' } })) });
+add('post', '/api/store/join-requests', 'requestStoreAccess', 'Store access', 'Request access using a store entry code', { status: 201, requestBody: body(object({ entryCode: string }, ['entryCode'])), schema: envelope(object({ id, storeId: id, status: string })) });
+add('get', '/api/store/join-requests', 'listStoreJoinRequests', 'Store access', 'List pending store join requests', { description: manager, schema: envelope(array(ref('JoinRequest'))) });
+add('post', '/api/store/join-requests/{id}/approve', 'approveStoreJoinRequest', 'Store access', 'Approve a join request with the selected role', { description: manager, parameters: [param()], requestBody: body(object({ role: { type: 'string', enum: ['manager', 'seller'] } }, ['role'])), schema: envelope(object({ approved: { type: 'boolean', enum: [true] }, role: string })) });
+add('post', '/api/store/join-requests/{id}/reject', 'rejectStoreJoinRequest', 'Store access', 'Reject a join request', { description: manager, parameters: [param()], schema: envelope(object({ approved: { type: 'boolean', enum: [false] } })) });
+add('post', '/api/store/invitations', 'inviteStoreUser', 'Store access', 'Invite an existing user by exact phone number', { description: manager, status: 201, requestBody: body(object({ phoneNumber: string, role: { type: 'string', enum: ['manager', 'seller'] } }, ['phoneNumber', 'role'])), schema: envelope(object({ id, role: string, status: string })) });
+add('get', '/api/store/members', 'listStoreMembers', 'Store access', 'List store members', { description: manager, schema: envelope(array(ref('StoreMember'))) });
+add('patch', '/api/store/members/{userId}', 'changeStoreMemberRole', 'Store access', 'Promote or demote a non-owner member', { description: 'Owner only.', parameters: [param('userId')], requestBody: body(object({ role: { type: 'string', enum: ['manager', 'seller'] } }, ['role'])), schema: envelope(object({ userId: id, role: string })) });
+add('delete', '/api/store/members/{userId}', 'removeStoreMember', 'Store access', 'Remove a member according to the role hierarchy', { description: manager, parameters: [param('userId')], schema: envelope(object({ removed: { type: 'boolean' }, userId: id })) });
 add('get', '/api/products', 'listProducts', 'Products', 'List product variants in the active store', { description: member, schema: envelope(array(ref('Product'))) });
 add('get', '/api/products/suggestions', 'suggestProducts', 'Products', 'Suggest matching variants in the active store', {
   description: member + ' Results rank exact article number, article prefix, then other substring matches. Landing cost is null for staff.',
@@ -190,7 +207,7 @@ module.exports = {
     description: 'Swagger page access uses the credentials configured in .env. New users: execute POST /api/auth/signup to create your account and store and sign in. Existing users: execute POST /api/auth/login with your application account. Then try GET /api/auth/me. The browser sends the session cookie automatically on this same origin; do not paste cookies into Authorize. POST /api/auth/signout ends the API session. Inventory mutations affect the connected database.',
   },
   servers: [{ url: '/' }],
-  tags: ['Authentication', 'System', 'Store', 'Products', 'Inventory', 'Sales', 'Uploads'].map(name => ({ name })),
+  tags: ['Authentication', 'System', 'Store', 'Store access', 'Products', 'Inventory', 'Sales', 'Uploads'].map(name => ({ name })),
   security: [{ sessionCookie: [] }],
   components: { schemas, securitySchemes: { sessionCookie: { type: 'apiKey', in: 'cookie', name: 'session', description: 'Set by POST /api/auth/login. Managed automatically by the browser; manual cookie entry is not supported by Swagger UI.' } } },
   paths,
