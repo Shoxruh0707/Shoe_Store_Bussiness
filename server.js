@@ -7,7 +7,7 @@ const { resolveLocalDateRange } = require("./src/local-date");
 
 
 
-function createApp({ pool, config = {}, clock = Date.now, uploads = {}, logger = console }) {
+function createApp({ pool, config = {}, clock = Date.now, uploads = {}, logger = console, mailer, services = {} }) {
 const env = config;
 async function testConnection() { const connection = await pool.getConnection(); try { await connection.ping(); } finally { connection.release(); } }
 const app = express();
@@ -118,6 +118,11 @@ function escapeLikeText(value) {
 
 const sessionCodec = require("./src/auth/legacy-session").createLegacySessionCodec({ secret: sessionSecret, clock });
 const { verifyPassword } = require("./src/auth/password");
+const effectiveMailer = mailer || require("./src/email/smtp-mailer").createSmtpMailer(env, { logger });
+const challengeService = services.challengeService || require("./src/auth/challenges").createChallengeService({
+  pool, mailer: effectiveMailer, clock, digestSecret: env.OTP_SECRET || sessionSecret
+});
+const { permissionsForRole } = require("./src/store/permissions");
 const DUMMY_PASSWORD_HASH = "$2b$10$esc2kYYKPeZ1pFrXx9PESOCMk9zq.y2swfX5DqxMmz0e0tHuF.hdG";
 function readSession(request) { return sessionCodec.decode(request.headers.cookie); }
 
@@ -772,7 +777,7 @@ async function requireAuth(request, response, next) {
     }
 
     const [users] = await pool.execute(
-      "SELECT id, fname, lname, phone_number AS phoneNumber, role, session_version AS sessionVersion FROM users WHERE id = ? LIMIT 1",
+      "SELECT id, fname, lname, email, email_verified_at AS emailVerifiedAt, phone_number AS phoneNumber, role, session_version AS sessionVersion FROM users WHERE id = ? LIMIT 1",
       [userId]
     );
 
@@ -1315,41 +1320,38 @@ async function fetchProduct(id, storeId = defaultStoreId, variantId = null) {
   };
 }
 
-route("post", "/api/auth/signup", async (request, response, next) => {
-  const payload = request.body || {};
-  const fname = typeof payload.fname === "string" ? payload.fname.trim() : "";
-  const lname = typeof payload.lname === "string" ? payload.lname.trim() : "";
-  const storeName = typeof payload.storeName === "string" ? payload.storeName.trim() : "";
-  const phoneNumber = typeof payload.phoneNumber === "string" ? payload.phoneNumber.trim() : "";
-  const password = typeof payload.password === "string" ? payload.password : "";
-  if (!fname || fname.length > 20 || !lname || lname.length > 20 || !storeName || storeName.length > 50 ||
-      !/^\+[1-9][0-9]{6,13}$/.test(phoneNumber) || password.length < 8 || Buffer.byteLength(password, "utf8") > 72) {
-    return apiMessage(response, "Provide first and last names (1-20 characters), storeName (1-50 characters), an international phoneNumber (+ followed by 7-14 digits), and a password of at least 8 characters and at most 72 UTF-8 bytes.", 400);
-  }
-  const passwordHash = await require("bcryptjs").hash(password, 12);
-  const connection = await pool.getConnection();
-  let user;
-  let store;
-  try {
-    await connection.beginTransaction();
-    const [createdUser] = await connection.execute(
-      "INSERT INTO users (fname, lname, phone_number, password_hash, role) VALUES (?, ?, ?, ?, 'seller')",
-      [fname, lname, phoneNumber, passwordHash]
-    );
-    const [createdStore] = await connection.execute("INSERT INTO store (store_name, is_active) VALUES (?, TRUE)", [storeName]);
-    await connection.execute("INSERT INTO store_users (user_id, store_id, role) VALUES (?, ?, 'owner')", [createdUser.insertId, createdStore.insertId]);
-    await connection.commit();
-    user = { id: createdUser.insertId, fname, lname, phoneNumber, role: "seller", sessionVersion: 1 };
-    store = { id: createdStore.insertId, storeName, storeRole: "owner", storeImage: null };
-  } catch (error) {
-    await connection.rollback();
-    if (error.code === "ER_DUP_ENTRY") return apiMessage(response, "An account with this phone number already exists.", 409);
-    return next(error);
-  } finally {
-    connection.release();
-  }
+route("post", "/api/auth/signup", (_request, response) => {
+  apiMessage(response, "SIGNUP_VERIFICATION_REQUIRED", 410);
+});
+
+route("post", "/api/auth/signup/start", async (request, response) => {
+  const result = await challengeService.startSignup(request.body || {}, { ip: request.ip });
+  response.status(202).json(result);
+});
+
+route("post", "/api/auth/signup/verify", async (request, response) => {
+  const user = await challengeService.verifySignup(request.body || {});
   setSessionCookie(response, user);
-  response.status(201).json({ user, store });
+  response.status(201).json({ user, store: null, onboardingRequired: true, permissions: permissionsForRole(null) });
+});
+
+route("post", "/api/auth/verification/resend", async (request, response) => {
+  response.status(202).json(await challengeService.resend(request.body || {}, { ip: request.ip }));
+});
+
+route("post", "/api/auth/password-reset/start", async (request, response) => {
+  await challengeService.startPasswordReset(request.body || {}, { ip: request.ip });
+  response.status(202).json({ accepted: true });
+});
+
+route("post", "/api/auth/password-reset/verify", async (request, response) => {
+  response.json(await challengeService.verifyPasswordReset(request.body || {}));
+});
+
+route("post", "/api/auth/password-reset/complete", async (request, response) => {
+  await challengeService.consumeResetToken(request.body || {});
+  clearSessionCookie(response);
+  response.status(204).end();
 });
 
 route("post", "/api/auth/login", async (request, response, next) => {
@@ -1359,7 +1361,7 @@ route("post", "/api/auth/login", async (request, response, next) => {
     let user = null;
     if (phoneNumber && password && password.length <= 1024) {
       const [users] = await pool.execute(
-        `SELECT id, fname, lname, phone_number AS phoneNumber, password_hash AS passwordHash, role,
+        `SELECT id, fname, lname, email, email_verified_at AS emailVerifiedAt, phone_number AS phoneNumber, password_hash AS passwordHash, role,
                 session_version AS sessionVersion
          FROM users
          WHERE phone_number = ?
@@ -1383,8 +1385,24 @@ route("post", "/api/auth/login", async (request, response, next) => {
 route("get", "/api/auth/me", requireAuth, (request, response) => {
   response.json({
     user: request.user,
-    store: request.store
+    store: request.store,
+    onboardingRequired: !request.store,
+    permissions: permissionsForRole(request.store?.storeRole)
   });
+});
+
+route("post", "/api/auth/email/start", requireAuth, async (request, response) => {
+  response.status(202).json(await challengeService.startEmailAttachment({ userId: request.user.id, email: request.body?.email }, { ip: request.ip }));
+});
+
+route("post", "/api/auth/email/verify", requireAuth, async (request, response) => {
+  response.json(await challengeService.verifyEmailAttachment({ userId: request.user.id, ...(request.body || {}) }));
+});
+
+route("post", "/api/auth/signout-all", requireAuth, async (request, response) => {
+  await pool.execute("UPDATE users SET session_version=session_version+1 WHERE id=?", [request.user.id]);
+  clearSessionCookie(response);
+  response.status(204).end();
 });
 
 route("get", "/api/store", requireAuth, requireStoreOwner, async (request, response, next) => {

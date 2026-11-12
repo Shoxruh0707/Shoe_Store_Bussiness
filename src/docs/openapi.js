@@ -17,7 +17,7 @@ const member = 'Requires an authenticated admin or seller with an active store m
 
 const schemas = {
   Error: object({ success: { type: 'boolean', enum: [false] }, error: string, message: string }),
-  User: object({ id, fname: string, lname: string, phoneNumber: string, role: string }),
+  User: object({ id, fname: string, lname: string, email: { type: 'string', format: 'email', nullable: true }, emailVerifiedAt: { type: 'string', nullable: true }, phoneNumber: string, role: string }),
   Store: object({ id, storeName: string, storeRole: string, storeImage: { type: 'string', nullable: true } }),
   Session: object({ user: ref('User'), store: { type: 'object', nullable: true, properties: { id, storeName: string, storeRole: string, storeImage: { type: 'string', nullable: true } } } }),
   Image: object({ id, name: string, type: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] }, data: { type: 'string', description: 'Base64 image bytes or a data URL.' }, tempId: string, path: string }),
@@ -65,6 +65,8 @@ const schemas = {
     items: array(ref('DailySale')),
   }, ['date', 'viewer', 'items']),
   Cancellation: object({ id: string, isCancelled: { type: 'boolean' }, restoredQuantity: integer }),
+  VerificationAccepted: object({ accepted: { type: 'boolean', enum: [true] } }, ['accepted']),
+  VerificationCode: object({ challengeId: id, code: { type: 'string', pattern: '^[0-9]{6}$' } }, ['challengeId', 'code']),
 };
 
 const paths = {};
@@ -81,14 +83,17 @@ function add(method, path, operationId, tag, summary, options = {}) {
   paths[path][method] = { operationId, tags: [tag], summary, ...(isPublic ? { security: [] } : {}), responses, ...details };
 }
 
-add('post', '/api/auth/signup', 'signup', 'Authentication', 'Create an account and your own store', {
-  public: true, status: 201, schema: ref('Session'),
-  description: 'Creates a seller account with owner membership in a new store and signs you in immediately. No existing API session is required. Passwords must contain at least 8 characters and at most 72 UTF-8 bytes. Clients cannot choose roles or an existing store. Phone numbers must use + followed by 7-14 digits without spaces.',
-  requestBody: body(object({ fname: { type: 'string', minLength: 1, maxLength: 20 }, lname: { type: 'string', minLength: 1, maxLength: 20 }, phoneNumber: { type: 'string', pattern: '^\\+[1-9][0-9]{6,13}$', maxLength: 15 }, password: { type: 'string', format: 'password', minLength: 8, maxLength: 72 }, storeName: { type: 'string', minLength: 1, maxLength: 50 } }, ['fname', 'lname', 'phoneNumber', 'password', 'storeName']),
-    { fname: 'Shoxruh', lname: 'Owner', phoneNumber: '+998901234567', password: 'choose-a-strong-password', storeName: 'My shoe store' }),
-});
-paths['/api/auth/signup'].post.responses[409] = response(ref('Error'), 'Phone number already registered');
-paths['/api/auth/signup'].post.responses[201].headers = { 'Set-Cookie': { description: 'HTTP-only session cookie managed by the browser.', schema: string } };
+add('post', '/api/auth/signup', 'legacySignup', 'Authentication', 'Retired direct signup endpoint', { public: true, status: 410, schema: ref('Error') });
+const signupFields = object({ fname: { type: 'string', minLength: 1, maxLength: 20 }, lname: { type: 'string', minLength: 1, maxLength: 20 }, email: { type: 'string', format: 'email' }, phoneNumber: { type: 'string', pattern: '^\\+[1-9][0-9]{6,13}$' }, password: { type: 'string', format: 'password', minLength: 8, maxLength: 72 }, passwordConfirmation: { type: 'string', format: 'password' } }, ['fname', 'lname', 'email', 'phoneNumber', 'password', 'passwordConfirmation']);
+add('post', '/api/auth/signup/start', 'startSignup', 'Authentication', 'Send the signup email code', { public: true, status: 202, schema: ref('VerificationAccepted'), requestBody: body(signupFields) });
+add('post', '/api/auth/signup/verify', 'verifySignup', 'Authentication', 'Verify signup and create the account', { public: true, status: 201, schema: ref('Session'), requestBody: body(ref('VerificationCode')) });
+add('post', '/api/auth/verification/resend', 'resendVerification', 'Authentication', 'Resend an active verification code', { public: true, status: 202, schema: ref('VerificationAccepted'), requestBody: body(object({ challengeId: id }, ['challengeId'])) });
+add('post', '/api/auth/password-reset/start', 'startPasswordReset', 'Authentication', 'Send a password reset code when the email exists', { public: true, status: 202, schema: ref('VerificationAccepted'), requestBody: body(object({ email: { type: 'string', format: 'email' } }, ['email'])) });
+add('post', '/api/auth/password-reset/verify', 'verifyPasswordReset', 'Authentication', 'Exchange a reset code for a short-lived token', { public: true, schema: object({ resetToken: string }, ['resetToken']), requestBody: body(ref('VerificationCode')) });
+add('post', '/api/auth/password-reset/complete', 'completePasswordReset', 'Authentication', 'Set a new password and revoke all sessions', { public: true, schema: ref('VerificationAccepted'), requestBody: body(object({ resetToken: string, password: { type: 'string', format: 'password' }, passwordConfirmation: { type: 'string', format: 'password' } }, ['resetToken', 'password', 'passwordConfirmation'])) });
+add('post', '/api/auth/email/start', 'startEmailAttachment', 'Authentication', 'Send a code to attach an email to the account', { status: 202, schema: ref('VerificationAccepted'), requestBody: body(object({ email: { type: 'string', format: 'email' } }, ['email'])) });
+add('post', '/api/auth/email/verify', 'verifyEmailAttachment', 'Authentication', 'Verify and attach the account email', { schema: ref('User'), requestBody: body(ref('VerificationCode')) });
+add('post', '/api/auth/signout-all', 'signoutAll', 'Authentication', 'Revoke every session for this account', { status: 204 });
 
 add('post', '/api/auth/login', 'login', 'Authentication', 'Sign in with an existing account', {
   public: true, schema: ref('Session'),
