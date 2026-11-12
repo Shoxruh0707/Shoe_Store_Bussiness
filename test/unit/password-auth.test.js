@@ -80,10 +80,10 @@ function authPool({ withUser = true, withStore = true } = {}) {
   return {
     execute: async (sql, values) => {
       if (sql.includes('FROM users') && sql.includes('phone_number = ?')) {
-        return [withUser ? [{ id: 7, fname: 'API', lname: 'User', phoneNumber: values[0], passwordHash: hash, role: 'seller' }] : []];
+        return [withUser ? [{ id: 7, fname: 'API', lname: 'User', phoneNumber: values[0], passwordHash: hash, role: 'seller', sessionVersion: 1 }] : []];
       }
       if (sql.includes('FROM users') && sql.includes('WHERE id = ?')) {
-        return [[{ id: 7, fname: 'API', lname: 'User', phoneNumber: '+998901234567', role: 'seller' }]];
+        return [[{ id: 7, fname: 'API', lname: 'User', phoneNumber: '+998901234567', role: 'seller', sessionVersion: 1 }]];
       }
       if (sql.includes('FROM store_users')) {
         return [withStore ? [{ id: 2, storeName: 'Test Store', storeRole: 'owner', storeImage: null }] : []];

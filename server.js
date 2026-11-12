@@ -122,7 +122,7 @@ const DUMMY_PASSWORD_HASH = "$2b$10$esc2kYYKPeZ1pFrXx9PESOCMk9zq.y2swfX5DqxMmz0e
 function readSession(request) { return sessionCodec.decode(request.headers.cookie); }
 
 function setSessionCookie(response, user) {
-  const token = sessionCodec.encode({ userId: user.id, role: user.role });
+  const token = sessionCodec.encode({ userId: user.id, sessionVersion: user.sessionVersion || 1 });
   const secure = sessionCookieSecure ? "; Secure" : "";
   response.setHeader("Set-Cookie", `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`);
 }
@@ -733,7 +733,7 @@ async function storeForUser(userId) {
      INNER JOIN store s ON s.id = su.store_id
      WHERE su.user_id = ?
        AND s.is_active = TRUE
-     ORDER BY FIELD(su.role, 'owner', 'manager', 'staff'), s.id
+     ORDER BY FIELD(su.role, 'owner', 'manager', 'seller'), s.id
      LIMIT 1`,
     [userId]
   );
@@ -772,7 +772,7 @@ async function requireAuth(request, response, next) {
     }
 
     const [users] = await pool.execute(
-      "SELECT id, fname, lname, phone_number AS phoneNumber, role FROM users WHERE id = ? LIMIT 1",
+      "SELECT id, fname, lname, phone_number AS phoneNumber, role, session_version AS sessionVersion FROM users WHERE id = ? LIMIT 1",
       [userId]
     );
 
@@ -783,6 +783,11 @@ async function requireAuth(request, response, next) {
     }
 
     request.user = users[0];
+    if (request.user.sessionVersion !== session.sessionVersion) {
+      clearSessionCookie(response);
+      apiMessage(response, "Tizimga qayta kiring.", 401);
+      return;
+    }
     request.store = ["admin", "seller"].includes(request.user.role) ? await storeForUser(request.user.id) : null;
     next();
   } catch (error) {
@@ -1334,7 +1339,7 @@ route("post", "/api/auth/signup", async (request, response, next) => {
     const [createdStore] = await connection.execute("INSERT INTO store (store_name, is_active) VALUES (?, TRUE)", [storeName]);
     await connection.execute("INSERT INTO store_users (user_id, store_id, role) VALUES (?, ?, 'owner')", [createdUser.insertId, createdStore.insertId]);
     await connection.commit();
-    user = { id: createdUser.insertId, fname, lname, phoneNumber, role: "seller" };
+    user = { id: createdUser.insertId, fname, lname, phoneNumber, role: "seller", sessionVersion: 1 };
     store = { id: createdStore.insertId, storeName, storeRole: "owner", storeImage: null };
   } catch (error) {
     await connection.rollback();
@@ -1354,7 +1359,8 @@ route("post", "/api/auth/login", async (request, response, next) => {
     let user = null;
     if (phoneNumber && password && password.length <= 1024) {
       const [users] = await pool.execute(
-        `SELECT id, fname, lname, phone_number AS phoneNumber, password_hash AS passwordHash, role
+        `SELECT id, fname, lname, phone_number AS phoneNumber, password_hash AS passwordHash, role,
+                session_version AS sessionVersion
          FROM users
          WHERE phone_number = ?
          LIMIT 1`,

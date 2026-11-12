@@ -1,7 +1,7 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {readConfig}=require('../../src/config');
-const valid={NODE_ENV:'production',SESSION_SECRET:'s'.repeat(32),PUBLIC_URL:'https://inventory.example'};
+const valid={NODE_ENV:'production',SESSION_SECRET:'s'.repeat(32),OTP_SECRET:'o'.repeat(32),PUBLIC_URL:'https://inventory.example'};
 test('production refuses insecure authentication configuration',()=>{
  for(const override of [{API_AUTH_REQUIRED:'false'},{SESSION_SECRET:''},{SESSION_SECRET:'short'},{SESSION_SECRET:'replace_with_at_least_32_random_bytes'},{SESSION_SECRET:' '.repeat(32)},{PUBLIC_URL:'http://inventory.example'},{SESSION_COOKIE_SECURE:'false'}])assert.throws(()=>readConfig({...valid,...override}));
  assert.doesNotThrow(()=>readConfig(valid));

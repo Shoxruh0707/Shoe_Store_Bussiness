@@ -2,8 +2,8 @@ const crypto = require('node:crypto');
 function createLegacySessionCodec({ secret, clock = Date.now, maxAgeMs = 604800000, futureSkewMs = 30000 }) {
   const mac = body => crypto.createHmac('sha256', secret).update(body).digest('base64url');
   return {
-    encode({ userId, role }) {
-      const body = Buffer.from(JSON.stringify({ userId, role, issuedAt: clock() })).toString('base64url');
+    encode({ userId, sessionVersion }) {
+      const body = Buffer.from(JSON.stringify({ userId, sessionVersion, issuedAt: clock() })).toString('base64url');
       return `${body}.${mac(body)}`;
     },
     decode(header = '') {
@@ -16,11 +16,11 @@ function createLegacySessionCodec({ secret, clock = Date.now, maxAgeMs = 6048000
         const expected = mac(body);
         if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
         const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-        if (!Number.isSafeInteger(payload.userId) || payload.userId <= 0 || !['admin', 'seller', 'customer'].includes(payload.role)) return null;
+        if (!Number.isSafeInteger(payload.userId) || payload.userId <= 0 || !Number.isSafeInteger(payload.sessionVersion) || payload.sessionVersion <= 0) return null;
         if (!Number.isSafeInteger(payload.issuedAt) || payload.issuedAt <= 0) return null;
         const age = clock() - payload.issuedAt;
         if (age >= maxAgeMs || age < -futureSkewMs) return null;
-        return { userId: payload.userId, role: payload.role, issuedAt: payload.issuedAt };
+        return { userId: payload.userId, sessionVersion: payload.sessionVersion, issuedAt: payload.issuedAt };
       } catch { return null; }
     }
   };

@@ -10,3 +10,4 @@ npm-debug.log*
 logs/
 .local-test/
 .worktrees/
+.superpowers/sdd/

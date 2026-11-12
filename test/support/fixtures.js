@@ -2,7 +2,9 @@ const bcrypt=require('bcryptjs');
 async function seedFixtures(pool) {
   for (const [table,column,value] of [['brands','brand_name','Unbranded'],['shoe_type','type','Tufli'],['colours','colour_name','Black'],['materials','material_type','Leather']]) await pool.execute(`INSERT INTO ${table} (${column}) VALUES (?)`,[value]);
   await pool.query("INSERT INTO store (id,store_name) VALUES (1,'Test Store'),(2,'Other Store')");
-  for(const [id,role,membership,store] of [[1,'admin','owner',1],[2,'seller','manager',1],[3,'seller','staff',1],[4,'admin','owner',2]]) {
+  const [[membershipColumn]]=await pool.query("SHOW COLUMNS FROM store_users LIKE 'role'");
+  const sellerMembership=membershipColumn.Type.includes("'seller'")?'seller':'staff';
+  for(const [id,role,membership,store] of [[1,'admin','owner',1],[2,'seller','manager',1],[3,'seller',sellerMembership,1],[4,'admin','owner',2]]) {
     await pool.execute('INSERT INTO users (id,fname,lname,phone_number,password_hash,role,telegram_id) VALUES (?,\'Test\',\'User\',?,?,?,?)',[id,'+1000000000'+id,bcrypt.hashSync('test-password',4),role,1000+id]);
     await pool.execute('INSERT INTO store_users (user_id,store_id,role) VALUES (?,?,?)',[id,store,membership]);
   }

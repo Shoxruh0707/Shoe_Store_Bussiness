@@ -29,7 +29,7 @@ test('canonical migration resumes after a real partially committed bootstrap',()
  const [tables]=await c.query('SHOW TABLES');assert.equal(tables.length,4);
  await runMigrations({connection:c,migrations,mode:'apply'});await assertSchemaReady(pool);
  const [applied]=await c.query('SELECT id FROM schema_migrations ORDER BY id');
- assert.deepEqual(applied,[{id:'0001-current-inventory'},{id:'0002-product-search-image-order'}]);
+ assert.deepEqual(applied,[{id:'0001-current-inventory'},{id:'0002-product-search-image-order'},{id:'0003-authorization-onboarding'}]);
  }finally{c.release();}
 }));
 test('ambiguous box ownership stops before touching existing rows',()=>withTestDatabase(async({pool})=>{

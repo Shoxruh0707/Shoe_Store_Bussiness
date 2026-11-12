@@ -2,6 +2,7 @@ const fs=require('node:fs');
 const crypto=require('node:crypto');
 const inventory=require('./0001-current-inventory');
 const catalogue=require('./0002-product-search-image-order');
+const authorization=require('./0003-authorization-onboarding');
 // Normalize line endings so Git's Windows checkout conversion cannot alter identity.
 const bytes = file => fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n');
 module.exports=[{
@@ -12,4 +13,8 @@ module.exports=[{
   id:'0002-product-search-image-order',
   checksum:crypto.createHash('sha256').update(bytes(require.resolve('./0002-product-search-image-order'))).digest('hex'),
   up:catalogue.up
+},{
+  id:'0003-authorization-onboarding',
+  checksum:crypto.createHash('sha256').update(bytes(require.resolve('./0003-authorization-onboarding'))).digest('hex'),
+  up:authorization.up
 }];

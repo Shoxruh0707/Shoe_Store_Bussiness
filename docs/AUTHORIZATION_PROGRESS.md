@@ -4,7 +4,7 @@ Last updated: 2026-11-12
 
 ## Current Phase: Authorization and Store Onboarding
 
-Status: design and implementation plan prepared; implementation pending plan review.
+Status: implementation in progress on `feature/authorization-onboarding` in an isolated worktree.
 
 Canonical documents:
 
@@ -35,6 +35,15 @@ Confirmed decisions:
 - Email verification, password reset, session revocation, membership invitations, and membership-management APIs do not yet exist.
 - Unit baseline on 2026-11-12: 34 tests passed, 0 failed.
 - The working tree already contained user changes to `README.md` and an untracked `docs/API-INTEGRATION-GUIDE.md`; these must be preserved.
+
+## Implementation Checkpoints
+
+- Task 1 schema migration: implemented and verified. Migration 0003 preserves immutable migration checksums, adds auth/store membership schema, converts `staff` memberships to `seller`, rejects ambiguous legacy multi-store memberships, and is resumable. Focused migration tests: 6 passed.
+- Task 2 email/security configuration: implemented. Provider-neutral Nodemailer SMTP adapter, independent OTP secret, disabled-mail safe failure, Docker/env wiring, and HMAC code digests are covered.
+- Task 3 challenge service: core implementation verified. Signup remains absent until code verification; OTP cooldown/expiry/attempt lock and non-enumerating reset with one-use reset token pass real-MySQL tests.
+- Versioned session primitive and role permission matrix are implemented with unit coverage; HTTP and membership route wiring remains in progress.
+- Current unit suite: 47 passed, 0 failed.
+- MySQL 8.4 test container is healthy on the repository's isolated test Compose stack.
 
 ## Later Phases
 
